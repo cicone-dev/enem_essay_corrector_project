@@ -1,4 +1,3 @@
-````markdown
 # 📝 API de Correção de Redações
 
 Este repositório contém o backend completo para um sistema de correção de redações com integração de IA.  

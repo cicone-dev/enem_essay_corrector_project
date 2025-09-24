@@ -6,7 +6,7 @@ const prisma = new PrismaClient();
 
 const generatePrompt = (essayText, essayTopic) => {
     let prompt = `
-    Você é um corretor de redações de alta performance, especializado na correção de redações do ENEM.
+    Você é um corretor HUMANO de redações de alta performance, especializado na correção de redações do ENEM por anos.
     Sua tarefa é avaliar a redação de acordo com as cinco competências do ENEM (C1 a C5) e fornecer uma análise textual completa.
     Sua resposta deve ser estruturada em JSON e seguir este formato:
     {
@@ -133,5 +133,158 @@ export const getEssayHistory = async (userId) => {
     } catch (error) {
         console.error("Erro ao buscar histórico de redações:", error.message);
         throw new Error("Não foi possível buscar o histórico de redações.");
+    }
+};
+
+
+
+
+export const getEssayAnalytics = async (userId) => {
+    try {
+        const essays = await prisma.essay.findMany({
+            where: {
+                userId: userId
+            },
+            include: {
+                corrections: true
+            },
+            orderBy: {
+                createdAt: 'asc'
+            }
+        });
+
+        if (essays.length === 0) {
+            return {
+                totalCorrections: 0,
+                averageTotalGrade: 0,
+                competencyPerformance: {}
+            };
+        }
+
+        const totalCorrections = essays.length;
+        let totalGradesSum = 0;
+        const competencyScores = {
+            c1: [],
+            c2: [],
+            c3: [],
+            c4: [],
+            c5: []
+        };
+
+        essays.forEach(essay => {
+            if (essay.corrections && essay.corrections.length > 0) {
+                const latestCorrection = essay.corrections[essay.corrections.length - 1];
+                totalGradesSum += latestCorrection.total;
+                
+                // Usando o Object.keys para garantir que o código não quebre se o JSON de notas mudar
+                Object.keys(competencyScores).forEach(comp => {
+                    const score = latestCorrection.notes[comp]?.nota;
+                    if (score !== undefined) {
+                        competencyScores[comp].push(score);
+                    }
+                });
+            }
+        });
+
+        const averageTotalGrade = totalGradesSum / totalCorrections;
+
+        const competencyPerformance = {};
+        Object.keys(competencyScores).forEach(comp => {
+            const scores = competencyScores[comp];
+            if (scores.length > 0) {
+                const sum = scores.reduce((a, b) => a + b, 0);
+                competencyPerformance[comp] = sum / scores.length;
+            } else {
+                competencyPerformance[comp] = 0;
+            }
+        });
+
+        return {
+            totalCorrections: totalCorrections,
+            averageTotalGrade: Math.round(averageTotalGrade),
+            competencyPerformance: competencyPerformance
+        };
+
+    } catch (error) {
+        console.error("Erro ao buscar análises de redação:", error.message);
+        throw new Error("Não foi possível buscar as análises de redação.");
+    }
+};
+
+
+export const getUserAchievements = async (userId) => {
+    try {
+        const essays = await prisma.essay.findMany({
+            where: {
+                userId: userId
+            },
+            include: {
+                corrections: true
+            },
+            orderBy: {
+                createdAt: 'desc'
+            }
+        });
+
+        // 1. Defina as conquistas e seus critérios
+        const achievements = [
+            {
+                id: 'first_essay',
+                title: 'Primeira Redação',
+                description: 'Corrigiu sua primeira redação.',
+                unlocked: essays.length >= 1
+            },
+            {
+                id: 'five_essays',
+                title: '5 Redações Corrigidas',
+                description: 'Corrigiu 5 redações no total.',
+                unlocked: essays.length >= 5
+            },
+            {
+                id: 'good_start',
+                title: 'Bom Começo',
+                description: 'Conseguiu uma nota de 800+ em sua primeira redação.',
+                unlocked: false
+            },
+            {
+                id: 'perfect_c5',
+                title: 'Competência 5 Perfeita',
+                description: 'Alcançou a nota máxima (200) na Competência 5.',
+                unlocked: false
+            },
+            {
+                id: 'road_to_1000',
+                title: 'Caminho para 1000',
+                description: 'Alcançou uma nota de 900+ em uma redação.',
+                unlocked: false
+            }
+        ];
+
+        // 2. Verifique os critérios para as conquistas mais complexas
+        const essayGrades = essays.map(e => e.corrections[0]?.total || 0);
+        const competency5Grades = essays.map(e => e.corrections[0]?.notes?.c5?.nota || 0);
+
+        // Verifica a conquista "Bom Começo"
+        if (essays.length > 0 && essayGrades[0] >= 800) {
+            const achievement = achievements.find(a => a.id === 'good_start');
+            if (achievement) achievement.unlocked = true;
+        }
+
+        // Verifica a conquista "Competência 5 Perfeita"
+        if (competency5Grades.some(grade => grade >= 200)) {
+            const achievement = achievements.find(a => a.id === 'perfect_c5');
+            if (achievement) achievement.unlocked = true;
+        }
+
+        // Verifica a conquista "Caminho para 1000"
+        if (essayGrades.some(grade => grade >= 900)) {
+            const achievement = achievements.find(a => a.id === 'road_to_1000');
+            if (achievement) achievement.unlocked = true;
+        }
+
+        return achievements;
+    } catch (error) {
+        console.error("Erro ao buscar conquistas:", error.message);
+        throw new Error("Não foi possível buscar as conquistas.");
     }
 };

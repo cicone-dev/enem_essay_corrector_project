@@ -4,9 +4,10 @@ import { GoogleGenerativeAI } from '@google/generative-ai';
 const genAI = new GoogleGenerativeAI(process.env.GEMINI_API_KEY);
 const prisma = new PrismaClient();
 
-const generatePrompt = (essayText) => `
+const generatePrompt = (essayText, essayTopic) => {
+    let prompt = `
     Você é um corretor de redações de alta performance, especializado na correção de redações do ENEM.
-    Sua tarefa é avaliar a redação de acordo com as cinco competências do ENEM (C1 a C5).
+    Sua tarefa é avaliar a redação de acordo com as cinco competências do ENEM (C1 a C5) e fornecer uma análise textual completa.
     Sua resposta deve ser estruturada em JSON e seguir este formato:
     {
       "competencias": {
@@ -32,26 +33,43 @@ const generatePrompt = (essayText) => `
         }
       },
       "total": number,
-      "feedbackGeral": string
+      "feedbackGeral": string,
+      "pontosPositivos": string,
+      "pontosA_Melhorar": string,
+      "analiseTextual": {
+        "coesaoE_Coerencia": string,
+        "repertorioSociocultural": string,
+        "dominioDaGramatica": string,
+        "argumentacao": string
+      },
+      "sugestoesDeMelhora": string
     }
     
     A nota de cada competência deve ser um múltiplo de 40 (0, 40, 80, 120, 160, 200). A nota total deve ser a soma das cinco competências.
-    O feedback geral deve ser conciso e útil.
-    Aqui está a redação para você corrigir:
+    O feedback geral deve ser conciso. Use o campo 'pontosPositivos' para resumir os acertos da redação e o 'pontosA_Melhorar' para os principais problemas. A 'analiseTextual' deve conter comentários técnicos sobre coesão, repertório, gramática e argumentação. As 'sugestoesDeMelhora' devem ser um parágrafo único com dicas práticas.
+
+    A redação a ser corrigida é:
     
     "${essayText}"
-`;
+    `;
+
+    if (essayTopic) {
+        prompt += `\nO tema específico da redação é: "${essayTopic}"`;
+    }
+
+    return prompt;
+};
 
 export const correctEssay = async (userId, essayData) => {
     try {
-        const { text } = essayData;
+        const { text, topic } = essayData;
 
         if (!text) {
             throw new Error("O campo 'text' é obrigatório.");
         }
 
         const model = genAI.getGenerativeModel({ model: "gemini-1.5-flash" });
-        const prompt = generatePrompt(text);
+        const prompt = generatePrompt(text, topic);
 
         const result = await model.generateContent(prompt);
         const response = await result.response;
@@ -59,7 +77,6 @@ export const correctEssay = async (userId, essayData) => {
 
         const jsonMatch = responseText.match(/```json\n([\s\S]*?)\n```/);
         let correctionResult;
-
         try {
             if (jsonMatch) {
                 const jsonString = jsonMatch[1];
@@ -77,8 +94,13 @@ export const correctEssay = async (userId, essayData) => {
             data: {
                 userId: userId,
                 text: text,
-                notes: correctionResult.competencias,
-                total: correctionResult.total,
+                topic: topic,
+                corrections: {
+                    create: {
+                        notes: correctionResult.competencias,
+                        total: correctionResult.total,
+                    },
+                },
             },
         });
 
@@ -90,5 +112,26 @@ export const correctEssay = async (userId, essayData) => {
     } catch (error) {
         console.error("Erro na correção da redação:", error);
         throw new Error("Não foi possível corrigir a redação.");
+    }
+};
+
+export const getEssayHistory = async (userId) => {
+    try {
+        const essays = await prisma.essay.findMany({
+            where: {
+                userId: userId
+            },
+            include: {
+                corrections: true
+            },
+            orderBy: {
+                createdAt: 'desc'
+            }
+        });
+
+        return essays;
+    } catch (error) {
+        console.error("Erro ao buscar histórico de redações:", error.message);
+        throw new Error("Não foi possível buscar o histórico de redações.");
     }
 };

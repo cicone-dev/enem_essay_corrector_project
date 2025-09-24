@@ -1,9 +1,6 @@
 // This is your Prisma schema file,
 // learn more about it in the docs: https://pris.ly/d/prisma-schema
 
-// Looking for ways to speed up your queries, or scale easily with your serverless or edge functions?
-// Try Prisma Accelerate: https://pris.ly/cli/accelerate-init
-
 generator client {
   provider = "prisma-client-js"
 }
@@ -14,23 +11,32 @@ datasource db {
 }
 
 model User {
-  id        String   @id @default(auto()) @map("_id") @db.ObjectId
-  email     String   @unique
-  name      String
-  essays    Essay[]
+  id         String   @id @default(auto()) @map("_id") @db.ObjectId
+  email      String   @unique
+  password   String
+  name       String
   profilePic String?
-  role      String   @default("user") // Pode ser 'user' ou 'admin'
-  password  String // Aqui vamos armazenar o hash da senha, nunca a senha pura!
-  createdAt DateTime @default(now())
-  updatedAt DateTime @updatedAt
+  essays     Essay[]
+  createdAt  DateTime @default(now())
+  updatedAt  DateTime @updatedAt
 }
-// Crie um novo modelo para as redações
+
 model Essay {
-  id        String     @id @default(auto()) @map("_id") @db.ObjectId
-  userId    String     @db.ObjectId
-  user      User       @relation(fields: [userId], references: [id])
-  text      String
-  notes     Json
-  total     Int
-  createdAt DateTime   @default(now())
+  id         String       @id @default(auto()) @map("_id") @db.ObjectId
+  userId     String       @db.ObjectId
+  user       User         @relation(fields: [userId], references: [id])
+  topic      String?
+  text       String
+  corrections Correction[]
+  createdAt  DateTime     @default(now())
+  updatedAt  DateTime     @updatedAt
+}
+
+model Correction {
+  id          String   @id @default(auto()) @map("_id") @db.ObjectId
+  essayId     String   @db.ObjectId
+  essay       Essay    @relation(fields: [essayId], references: [id])
+  notes       Json
+  total       Int
+  createdAt   DateTime @default(now())
 }

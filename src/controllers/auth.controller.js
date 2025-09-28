@@ -5,6 +5,13 @@ import { v2 as cloudinary } from 'cloudinary';
 
 const prisma = new PrismaClient();
 
+cloudinary.config({
+  cloud_name: process.env.CLOUDINARY_CLOUD_NAME,
+  api_key: process.env.CLOUDINARY_API_KEY,
+  api_secret: process.env.CLOUDINARY_API_SECRET
+});
+
+
 const generateTokenAndSetCookie = (userId, res) => {
     const token = jwt.sign({ id: userId }, process.env.JWT_SECRET, {
         expiresIn: '15d',

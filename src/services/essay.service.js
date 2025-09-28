@@ -68,7 +68,7 @@ export const correctEssay = async (userId, essayData) => {
             throw new Error("O campo 'text' é obrigatório.");
         }
 
-        const model = genAI.getGenerativeModel({ model: "gemini-1.5-flash" });
+        const model = genAI.getGenerativeModel({ model: process.env.GEMINI_MODEL_NAME });
         const prompt = generatePrompt(text, topic);
 
         const result = await model.generateContent(prompt);

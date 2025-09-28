@@ -1,0 +1,13 @@
+# Dependências locais
+node_modules
+npm-debug.log
+
+# Logs e arquivos temporários
+*.log
+
+# Variáveis de ambiente
+.env
+.env.*
+
+# Arquivos do Prisma
+/prisma/dev.db

@@ -12,7 +12,16 @@ const app = express();
 const PORT = process.env.PORT || 3000;
 
 app.use(helmet());
-app.use(cors());
+app.use(cors({
+    // Permite requisições de QUALQUER origem (dominio ou porta)
+    origin: '*', 
+    
+    // Você ainda pode restringir os métodos, se quiser:
+    methods: ['GET', 'POST', 'PUT', 'DELETE'], 
+    // Permite o envio de cookies e cabeçalhos de autorização
+    credentials: true 
+}));
+
 app.use(express.json({ limit: "10mb" }));
 app.use(cookieParser());
 app.set('trust proxy', 1);

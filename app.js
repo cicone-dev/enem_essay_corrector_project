@@ -7,6 +7,7 @@ import authRoutes from './src/routes/auth.routes.js';
 import essayRoutes from './src/routes/essay.routes.js';
 import cookieParser from 'cookie-parser'; 
 import { protectRoute } from './src/middlewares/auth.middleware.js';
+const FRONTEND_URL = 'http://localhost:5173'; 
 
 const app = express();
 const PORT = process.env.PORT || 3000;
@@ -14,7 +15,7 @@ const PORT = process.env.PORT || 3000;
 app.use(helmet());
 app.use(cors({
     // Permite requisições de QUALQUER origem (dominio ou porta)
-    origin: '*', 
+    origin: FRONTEND_URL, 
     
     // Você ainda pode restringir os métodos, se quiser:
     methods: ['GET', 'POST', 'PUT', 'DELETE'], 
@@ -22,8 +23,9 @@ app.use(cors({
     credentials: true 
 }));
 
-app.use(express.json({ limit: "10mb" }));
+app.use(express.json());
 app.use(cookieParser());
+app.use(express.urlencoded({ extended: true })); // Para dados de formulário
 app.set('trust proxy', 1);
 
 const apiLimiter = rateLimit({

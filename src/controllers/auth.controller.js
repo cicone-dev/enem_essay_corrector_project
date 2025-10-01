@@ -7,25 +7,32 @@ import { v2 as cloudinary } from 'cloudinary';
 
 const prisma = new PrismaClient();
 
-// ... (cloudinary config) ...
+// Configuração do Cloudinary (Mantenha sua configuração real aqui)
+cloudinary.config({
+  cloud_name: process.env.CLOUDINARY_CLOUD_NAME,
+  api_key: process.env.CLOUDINARY_API_KEY,
+  api_secret: process.env.CLOUDINARY_API_SECRET
+});
 
+/**
+ * Gera o JWT, configura-o como cookie e retorna o token gerado.
+ */
 const generateTokenAndSetCookie = (userId, res) => {
     const token = jwt.sign({ id: userId }, process.env.JWT_SECRET, {
         expiresIn: '15d',
     });
     res.cookie('jwt', token, {
         maxAge: 15 * 24 * 60 * 60 * 1000, // 15 days
-        httpOnly: true, // prevent XSS attacks
+        httpOnly: true, // Previne ataques XSS
         
-        // 🚨 CORREÇÃO FINAL: Mudar SameSite para None e adicionar Secure
-        // Isso é NECESSÁRIO para comunicação cross-site (localhost para Render HTTPS)
+        // 🚨 CORREÇÃO FINAL OBRIGATÓRIA: Para cookies cross-site (localhost <-> Render HTTPS)
         sameSite: "None", 
-        secure: true, // ESSENCIAL: 'SameSite: None' requer 'Secure: true'
+        secure: true, // 'SameSite: None' requer 'Secure: true'
     });
+    return token; 
 };
 
 export const register = async (req, res) => {
-// ... (função register continua a mesma) ...
     try {
         const { name, email, password } = req.body;
         
@@ -50,12 +57,17 @@ export const register = async (req, res) => {
         });
 
         if (newUser) {
-            generateTokenAndSetCookie(newUser.id, res);
+            const token = generateTokenAndSetCookie(newUser.id, res); 
+            
+            // ✅ RESPOSTA CORRIGIDA: Retorna { token, user }
             res.status(201).json({
-                id: newUser.id,
-                name: newUser.name,
-                email: newUser.email,
-                profilePic: newUser.profilePic,
+                token: token,
+                user: {
+                    id: newUser.id,
+                    name: newUser.name,
+                    email: newUser.email,
+                    profilePic: newUser.profilePic,
+                }
             });
         } else {
             res.status(400).json({ message: "Invalid user data." });
@@ -70,14 +82,14 @@ export const login = async (req, res) => {
     try {
         const { email, password } = req.body;
         
-        // CORREÇÃO PRISMA MANTIDA
+        // ✅ CORREÇÃO PRISMA: Garante que a senha é buscada para comparação
         const user = await prisma.user.findUnique({ 
             where: { email },
             select: { 
                 id: true,
                 name: true,
                 email: true,
-                password: true,
+                password: true, // ESSENCIAL: Permite a comparação
                 profilePic: true,
             }
         }); 
@@ -87,16 +99,21 @@ export const login = async (req, res) => {
         }
         
         const isPasswordCorrect = await bcrypt.compare(password, user.password); 
-                if (!isPasswordCorrect) {
+        if (!isPasswordCorrect) {
             return res.status(400).json({ message: "Invalid credentials." });
         }
 
-        generateTokenAndSetCookie(user.id, res);
+        const token = generateTokenAndSetCookie(user.id, res); 
+        
+        // ✅ RESPOSTA CORRIGIDA: Retorna { token, user }
         res.status(200).json({
-            id: user.id,
-            name: user.name,
-            email: user.email,
-            profilePic: user.profilePic,
+            token: token,
+            user: {
+                id: user.id,
+                name: user.name,
+                email: user.email,
+                profilePic: user.profilePic,
+            }
         });
     } catch (error) {
         console.error("Error in login controller:", error.message);
@@ -105,7 +122,6 @@ export const login = async (req, res) => {
 };
 
 export const updateProfilePic = async (req, res) => {
-// ... (função updateProfilePic continua a mesma) ...
     try {
         if (!req.file) {
             return res.status(400).json({ message: "No file uploaded." });
@@ -113,7 +129,7 @@ export const updateProfilePic = async (req, res) => {
 
         let user = req.user;
         
-        // A lógica foi corrigida para usar o buffer do arquivo em vez do caminho
+        // A lógica de upload de imagem para o Cloudinary usando buffer
         const result = await cloudinary.uploader.upload(
             `data:${req.file.mimetype};base64,${req.file.buffer.toString('base64')}`
         );

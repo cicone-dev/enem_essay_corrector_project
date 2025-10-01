@@ -67,13 +67,28 @@ export const register = async (req, res) => {
 export const login = async (req, res) => {
     try {
         const { email, password } = req.body;
-        const user = await prisma.user.findUnique({ where: { email } });
+        
+        // 🚨 CORREÇÃO: Forçar o Prisma a selecionar o campo 'password'.
+        // Isso é necessário se você configurou o 'select: false' ou '@omit' no seu schema.prisma
+        const user = await prisma.user.findUnique({ 
+            where: { email },
+            select: { // Adicione esta linha e especifique todos os campos que você precisa, incluindo a senha
+                id: true,
+                name: true,
+                email: true,
+                password: true, // <-- CRÍTICO: Incluir a senha
+                profilePic: true,
+                // Adicione outros campos necessários aqui
+            }
+        }); 
+
         if (!user) {
             return res.status(400).json({ message: "Invalid credentials." });
         }
         
-        const isPasswordCorrect = await bcrypt.compare(password, user.password);
-        if (!isPasswordCorrect) {
+        // A comparação agora deve ter o hash completo em user.password
+        const isPasswordCorrect = await bcrypt.compare(password, user.password); 
+                if (!isPasswordCorrect) {
             return res.status(400).json({ message: "Invalid credentials." });
         }
 

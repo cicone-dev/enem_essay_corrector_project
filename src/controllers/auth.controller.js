@@ -1,3 +1,5 @@
+// back/src/controllers/auth.controller.js
+
 import { PrismaClient } from '@prisma/client';
 import bcrypt from 'bcryptjs';
 import jwt from 'jsonwebtoken';
@@ -5,12 +7,7 @@ import { v2 as cloudinary } from 'cloudinary';
 
 const prisma = new PrismaClient();
 
-cloudinary.config({
-  cloud_name: process.env.CLOUDINARY_CLOUD_NAME,
-  api_key: process.env.CLOUDINARY_API_KEY,
-  api_secret: process.env.CLOUDINARY_API_SECRET
-});
-
+// ... (cloudinary config) ...
 
 const generateTokenAndSetCookie = (userId, res) => {
     const token = jwt.sign({ id: userId }, process.env.JWT_SECRET, {
@@ -19,11 +16,16 @@ const generateTokenAndSetCookie = (userId, res) => {
     res.cookie('jwt', token, {
         maxAge: 15 * 24 * 60 * 60 * 1000, // 15 days
         httpOnly: true, // prevent XSS attacks
-        sameSite: "strict", // CSRF attacks protection
+        
+        // 🚨 CORREÇÃO FINAL: Mudar SameSite para None e adicionar Secure
+        // Isso é NECESSÁRIO para comunicação cross-site (localhost para Render HTTPS)
+        sameSite: "None", 
+        secure: true, // ESSENCIAL: 'SameSite: None' requer 'Secure: true'
     });
 };
 
 export const register = async (req, res) => {
+// ... (função register continua a mesma) ...
     try {
         const { name, email, password } = req.body;
         
@@ -68,17 +70,15 @@ export const login = async (req, res) => {
     try {
         const { email, password } = req.body;
         
-        // 🚨 CORREÇÃO: Forçar o Prisma a selecionar o campo 'password'.
-        // Isso é necessário se você configurou o 'select: false' ou '@omit' no seu schema.prisma
+        // CORREÇÃO PRISMA MANTIDA
         const user = await prisma.user.findUnique({ 
             where: { email },
-            select: { // Adicione esta linha e especifique todos os campos que você precisa, incluindo a senha
+            select: { 
                 id: true,
                 name: true,
                 email: true,
-                password: true, // <-- CRÍTICO: Incluir a senha
+                password: true,
                 profilePic: true,
-                // Adicione outros campos necessários aqui
             }
         }); 
 
@@ -86,7 +86,6 @@ export const login = async (req, res) => {
             return res.status(400).json({ message: "Invalid credentials." });
         }
         
-        // A comparação agora deve ter o hash completo em user.password
         const isPasswordCorrect = await bcrypt.compare(password, user.password); 
                 if (!isPasswordCorrect) {
             return res.status(400).json({ message: "Invalid credentials." });
@@ -106,6 +105,7 @@ export const login = async (req, res) => {
 };
 
 export const updateProfilePic = async (req, res) => {
+// ... (função updateProfilePic continua a mesma) ...
     try {
         if (!req.file) {
             return res.status(400).json({ message: "No file uploaded." });

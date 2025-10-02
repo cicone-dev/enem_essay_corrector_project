@@ -54,4 +54,22 @@ router.get("/achievements", protectRoute, async (req, res) => {
     }
 });
 
+// Rota para buscar uma única redação pelo ID
+router.get("/:essayId", protectRoute, async (req, res) => {
+    try {
+        const { essayId } = req.params;
+        const essay = await getEssayById(essayId);
+        
+        if (!essay || essay.userId !== req.user.id) {
+            return res.status(404).json({ message: "Redação não encontrada ou acesso negado." });
+        }
+        
+        res.status(200).json(essay);
+    } catch (error) {
+        // Se o ID for mal formatado, o Prisma pode lançar um erro, por isso tratamos com 500
+        res.status(500).json({ message: "Não foi possível buscar a redação." });
+    }
+});
+
+
 export default router;

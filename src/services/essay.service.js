@@ -288,3 +288,30 @@ export const getUserAchievements = async (userId) => {
         throw new Error("Não foi possível buscar as conquistas.");
     }
 };
+
+export const getEssayById = async (essayId) => {
+    try {
+        const essay = await prisma.essay.findUnique({
+            where: {
+                id: essayId
+            },
+            // Incluímos as correções para que você tenha todos os dados
+            include: {
+                corrections: {
+                    orderBy: {
+                        createdAt: 'desc' // Pega a correção mais recente, se houver múltiplas
+                    }
+                }
+            }
+        });
+
+        if (!essay) {
+            throw new Error("Redação não encontrada.");
+        }
+
+        return essay;
+    } catch (error) {
+        console.error("Erro ao buscar redação por ID:", error.message);
+        throw new Error("Não foi possível buscar a redação.");
+    }
+};

@@ -306,8 +306,8 @@ export const getEssayById = async (essayId, userId) => { // ADICIONE userId aqui
         });
 
         if (!essay) {
-            // Se não encontrar, lança um erro específico para ser tratado como 404
-            throw new Error("Redação não encontrada ou acesso negado.");
+            // Lança um erro com um nome específico para o controller identificar
+            throw new Error("Redação não encontrada.");
         }
 
         return essay;

@@ -289,29 +289,31 @@ export const getUserAchievements = async (userId) => {
     }
 };
 
-export const getEssayById = async (essayId) => {
+export const getEssayById = async (essayId, userId) => { // ADICIONE userId aqui
     try {
         const essay = await prisma.essay.findUnique({
             where: {
-                id: essayId
+                id: essayId,
+                userId: userId // CRUCIAL: Garante que a redação pertença ao usuário
             },
-            // Incluímos as correções para que você tenha todos os dados
             include: {
                 corrections: {
                     orderBy: {
-                        createdAt: 'desc' // Pega a correção mais recente, se houver múltiplas
+                        createdAt: 'desc'
                     }
                 }
             }
         });
 
         if (!essay) {
-            throw new Error("Redação não encontrada.");
+            // Se não encontrar, lança um erro específico para ser tratado como 404
+            throw new Error("Redação não encontrada ou acesso negado.");
         }
 
         return essay;
     } catch (error) {
         console.error("Erro ao buscar redação por ID:", error.message);
+        // Se for um erro de formato de ID, o erro original é lançado (500), caso contrário, tratamos
         throw new Error("Não foi possível buscar a redação.");
     }
 };

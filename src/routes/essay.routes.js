@@ -58,15 +58,22 @@ router.get("/achievements", protectRoute, async (req, res) => {
 router.get("/:essayId", protectRoute, async (req, res) => {
     try {
         const { essayId } = req.params;
-        const essay = await getEssayById(essayId);
+        const userId = req.user.id; // Pega o ID do usuário do token
+
+        // Passa os dois IDs para a consulta do serviço
+        const essay = await getEssayById(essayId, userId); 
         
-        if (!essay || essay.userId !== req.user.id) {
-            return res.status(404).json({ message: "Redação não encontrada ou acesso negado." });
-        }
+        // Se a busca falhar (não existir OU não pertencer ao usuário), a função service lança um erro que é tratado abaixo.
         
         res.status(200).json(essay);
     } catch (error) {
-        // Se o ID for mal formatado, o Prisma pode lançar um erro, por isso tratamos com 500
+        // Se a redação não for encontrada ou o acesso for negado (erro lançado no service), retorna 404
+        if (error.message.includes("Redação não encontrada")) {
+            return res.status(404).json({ message: "Redação não encontrada ou acesso negado." });
+        }
+        
+        // Se for outro erro (ex: falha de banco de dados, ID malformado), retorna 500
+        console.error("Erro no controle de busca por ID:", error);
         res.status(500).json({ message: "Não foi possível buscar a redação." });
     }
 });

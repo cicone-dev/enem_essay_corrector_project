@@ -311,9 +311,10 @@ export const getEssayById = async (essayId, userId) => { // ADICIONE userId aqui
         }
 
         return essay;
-    } catch (error) {
+        } catch (error) {
         console.error("Erro ao buscar redação por ID:", error.message);
-        // Se for um erro de formato de ID, o erro original é lançado (500), caso contrário, tratamos
-        throw new Error("Não foi possível buscar a redação.");
+        // Não vamos mais lançar o erro genérico. Vamos lançar o erro original
+        // do Prisma, que será pego no controller. Isso evita a confusão do 500.
+        throw error; 
     }
 };

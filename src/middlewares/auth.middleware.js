@@ -37,11 +37,9 @@ export const protectRoute = async (req, res, next) => {
         req.user = user;
         next();
     } catch (error) {
-    // Para logs de depuração:
-    console.error("Authentication Error:", error.message);
-    
-    // Qualquer erro aqui (jwt.verify, token malformado, etc.) é um erro de autenticação.
-    // Retorna 401 e encerra a requisição.
-    return res.status(401).json({ message: "Token is invalid, expired, or authorization failed." }); 
+        // CORREÇÃO CRÍTICA: Se o token for inválido, expirado ou houver qualquer erro de auth,
+        // retornamos 401 e o 'return' força o middleware a PARAR IMEDIATAMENTE.
+        console.error("Authentication failed:", error.message);
+        return res.status(401).json({ message: "Token is invalid, expired, or authorization failed." });
     }
 };

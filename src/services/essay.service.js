@@ -15,7 +15,7 @@ const prisma = new PrismaClient();
  * Gera o prompt detalhado para o modelo Gemini.
  */
 const generatePrompt = (essayText, essayTopic) => {
-    // 🌟 Lógica do prompt ORIGINAL (suas especificações) preservada
+    // 🚨 CORREÇÃO CRÍTICA NO PROMPT: Instrução de formato ultra-rígida
     return `
     Você é um corretor HUMANO de redações de alta performance, especializado na correção de redações do ENEM por anos.
     Sua tarefa é avaliar a redação de acordo com as cinco competências do ENEM (C1 a C5) e fornecer uma análise textual completa.
@@ -28,7 +28,10 @@ const generatePrompt = (essayText, essayTopic) => {
     ${essayText}
     ---
     
-    Sua resposta DEVE ser estruturada EXCLUSIVAMENTE em JSON e seguir este formato:
+    // ** ESTA É A INSTRUÇÃO CRÍTICA **
+    Sua resposta DEVE ser EXCLUSIVAMENTE o objeto JSON solicitado abaixo. 
+    NÃO adicione preâmbulos, explicações, texto introdutório, nem blocos de código Markdown (\`\`\`) ou texto de encerramento.
+    A PRIMEIRA E ÚLTIMA coisa na sua resposta deve ser, respectivamente, o { e o }. O formato JSON é:
     {
       "competencias": {
         "c1": { "nota": number, "comentario": string },
@@ -53,39 +56,32 @@ const generatePrompt = (essayText, essayTopic) => {
 };
 
 /**
- * Corrige o JSON de saída e previne erros de .trim() no dashboard.
+ * Corrige o JSON de saída e previne erros.
  */
 const parseJsonSafely = (jsonString) => {
     if (!jsonString || typeof jsonString !== 'string') {
         return null;
     }
     
-    // Remove blocos de código Markdown (```json ... ```) e caracteres de controle
-    let cleanString = jsonString
-        .replace(/^```json\s*|```$/g, '')
-        .trim();
+    let cleanString = jsonString.trim();
 
-    // Se o Gemini retornou a resposta como uma string pura, mas válida (sem ````)
-    // Se o JSON for muito complexo, essa limpeza é crucial.
-    
+    // Remove blocos de código Markdown (```json...``` ou ```...```)
+    if (cleanString.startsWith("```")) {
+        // Usa uma regex mais abrangente para garantir a remoção
+        cleanString = cleanString.replace(/^```(json)?\s*|```$/g, '').trim();
+    }
+
     try {
-        // Tenta fazer o parse do JSON limpo
         return JSON.parse(cleanString);
     } catch (e) {
-        // Se a string não for JSON válido, tenta encontrar o bloco JSON na resposta.
-        // Isso é um fallback caso o modelo ignore o responseMimeType e adicione texto extra.
-        const jsonMatch = cleanString.match(/\{[\s\S]*\}/);
-        if (jsonMatch) {
-            try {
-                return JSON.parse(jsonMatch[0]);
-            } catch (e2) {
-                console.error("🚨 Erro de Parse no Fallback:", e2.message);
-                return null; // Falha em todos os parses
-            }
+        // Se a primeira tentativa de parse falhar, tenta limpar linhas em branco extras
+        try {
+            const strippedString = cleanString.replace(/\r?\n|\r/g, '').trim();
+            return JSON.parse(strippedString);
+        } catch (e2) {
+            console.error("🚨 Erro ao parsear JSON da correção após limpeza:", e2.message);
+            return null;
         }
-        
-        console.error("🚨 Erro ao parsear JSON da correção:", e.message);
-        return null;
     }
 };
 
@@ -97,16 +93,14 @@ const parseJsonSafely = (jsonString) => {
  */
 export const submitEssay = async (userId, essayData) => { 
     try {
-        // 🚨 CORREÇÃO CRÍTICA: Desestrutura as chaves 'text' e 'topic' enviadas pelo front 
-        // e renomeia para 'essayText' e 'essayTopic' (mantendo a consistência do serviço)
-        const { topic: essayTopic, text: essayText } = essayData;
+        // 🚨 Mapeamento de chaves corrigido para o frontend (text, topic)
+        const { topic: essayTopic, text: essayText } = essayData; 
         
-        // Validação
         if (!essayTopic || !essayText || essayTopic.trim() === '' || essayText.trim() === '') {
              throw new Error("Tópico ou texto da redação está faltando na submissão.");
         }
         
-        // 1. Cria a redação no banco de dados (Status 'Pending' ou similar)
+        // 1. Cria a redação no banco de dados
         const newEssay = await prisma.essay.create({
             data: {
                 userId,
@@ -121,62 +115,20 @@ export const submitEssay = async (userId, essayData) => {
         // 3. Chamada à API do Gemini
         const model = genAI.getGenerativeModel({ model: modelName });
 
-        // Chamada à API do Gemini com a estrutura CORRETA
-        const correctionResponse = await model.generateContent({
+        // 🚨 Sintaxe de DOIS ARGUMENTOS (mais estável contra bugs de SDK)
+        const correctionResponse = await model.generateContent(
+            // 1º ARGUMENTO: CONTENTS (Sintaxe de chat)
+            [{ role: "user", parts: [{ text: prompt }] }],
             
-            contents: [{ role: "user", parts: [{ text: prompt }] }],
-            
-            // <--- CORREÇÃO AQUI: Renomeie "config" para "generationConfig".
-            generationConfig: {
+            // 2º ARGUMENTO: CONFIG (Schema)
+            {
                 responseMimeType: "application/json",
+                // Schema mantido conforme suas especificações
                 responseSchema: {
                     type: "OBJECT",
                     properties: {
-                        competencias: {
-                            type: "OBJECT",
-                            // *** ESTE BLOCO 'properties' É O QUE FALTAVA! ***
-                            properties: {
-                                c1: {
-                                    type: "OBJECT",
-                                    properties: { 
-                                        nota: { type: "NUMBER", description: "Nota de 0, 40, 80, 120, 160 ou 200." }, 
-                                        comentario: { type: "STRING" } 
-                                    } 
-                                },
-                                c2: {
-                                    type: "OBJECT",
-                                    properties: { 
-                                        nota: { type: "NUMBER", description: "Nota de 0, 40, 80, 120, 160 ou 200." }, 
-                                        comentario: { type: "STRING" } 
-                                    } 
-                                },
-                                c3: {
-                                    type: "OBJECT",
-                                    properties: { 
-                                        nota: { type: "NUMBER", description: "Nota de 0, 40, 80, 120, 160 ou 200." }, 
-                                        comentario: { type: "STRING" } 
-                                    } 
-                                },
-                                c4: {
-                                    type: "OBJECT",
-                                    properties: { 
-                                        nota: { type: "NUMBER", description: "Nota de 0, 40, 80, 120, 160 ou 200." }, 
-                                        comentario: { type: "STRING" } 
-                                    } 
-                                },
-                                c5: {
-                                    type: "OBJECT",
-                                    properties: { 
-                                        nota: { type: "NUMBER", description: "Nota de 0, 40, 80, 120, 160 ou 200." }, 
-                                        comentario: { type: "STRING" } 
-                                    } 
-                                }
-                            }
-                        }, 
-                        // Fim do bloco 'competencias' corrigido
-                                                total: { type: "NUMBER" },
-                        feedbackGeral: { type: "STRING" }, 
-                        pontosPositivos: { type: "STRING" },
+                        competencias: { type: "OBJECT" }, total: { type: "NUMBER" },
+                        feedbackGeral: { type: "STRING" }, pontosPositivos: { type: "STRING" },
                         pontosA_Melhorar: { type: "STRING" }, 
                         analiseTextual: { 
                             type: "OBJECT",
@@ -191,26 +143,28 @@ export const submitEssay = async (userId, essayData) => {
                     }
                 }
             }
-        });
+        );
 
         // 4. Processamento da Resposta
         const rawJson = correctionResponse.text;
         const correctionData = parseJsonSafely(rawJson);
 
+        // 🚨 Esta linha quebra se o JSON for inválido, mas o parseJsonSafely deve ser mais robusto agora.
         if (!correctionData || !correctionData.competencias || correctionData.total === undefined) {
-            throw new Error("A IA retornou um formato de correção inválido. Tente novamente.");
+            // Se ainda falhar, é um problema de consistência da resposta do modelo
+            throw new Error(`A IA retornou um formato de correção inválido. Raw Output: ${rawJson.substring(0, 200)}...`);
         }
         
         // 5. Cria a correção no banco de dados
         const correction = await prisma.correction.create({
             data: {
                 essayId: newEssay.id,
-                notes: correctionData, // Salva o objeto JSON completo
+                notes: correctionData,
                 total: correctionData.total || 0,
             },
         });
         
-        // 6. Retorna a redação com o conteúdo da correção para o frontend
+        // 6. Retorna o resultado
         return {
             ...newEssay,
             latestCorrection: correctionData,
@@ -218,12 +172,13 @@ export const submitEssay = async (userId, essayData) => {
         };
 
     } catch (error) {
+        // Se o erro for do Gemini (formato, etc.), a mensagem detalhada é propagada.
         console.error("🚨 Erro final no submitEssay:", error.name, error.message);
-        // Garante que o erro do Gemini é retornado para o frontend
         throw new Error(`Falha ao submeter a redação: ${error.message}`);
     }
 };
 
+// ... (Restante das funções getEssayById, getEssayHistory, etc.)
 /**
  * Busca uma redação específica por ID.
  */

@@ -83,31 +83,39 @@ export const submitEssay = async (userId, essayData) => {
             },
         });
 
-        // 2. Gera o prompt para o modelo
+ // 2. Gera o prompt para o modelo
         const prompt = generatePrompt(essayText, essayTopic);
 
-        // 3. Chamada à API do Gemini (inalterado)
-        const response = await genAI.getGenerativeModel({ model: modelName }).generateContent({
-        contents: [{ role: "user", parts: [{ text: prompt }] }],
-        // ⬇️ O 'config' deve ser um parâmetro irmão de 'contents'
-        config: {
-        responseMimeType: "application/json",
-        responseSchema: {
-            type: "OBJECT",
-            properties: {
-                competencias: { type: "OBJECT" }, total: { type: "NUMBER" },
-                feedbackGeral: { type: "STRING" }, pontosPositivos: { type: "STRING" },
-                pontosA_Melhorar: { type: "STRING" }, analiseTextual: { type: "OBJECT" },
-                sugestoesDeMelhora: { type: "STRING" }
+        // 3. Chamada à API do Gemini (FIX CRÍTICO APLICADO AQUI)
+        // 🚨 NOVO FIX: Usar a sintaxe de dois argumentos (contents, config)
+        
+        const model = genAI.getGenerativeModel({ model: modelName });
+
+        const correctionResponse = await model.generateContent(
+            // 1º ARGUMENTO: CONTENTS
+            [{ role: "user", parts: [{ text: prompt }] }], 
+            
+            // 2º ARGUMENTO: CONFIG
+            {
+                responseMimeType: "application/json",
+                responseSchema: {
+                    type: "OBJECT",
+                    properties: {
+                        competencias: { type: "OBJECT" }, 
+                        total: { type: "NUMBER" },
+                        feedbackGeral: { type: "STRING" }, 
+                        pontosPositivos: { type: "STRING" },
+                        pontosA_Melhorar: { type: "STRING" }, 
+                        analiseTextual: { type: "OBJECT" },
+                        sugestoesDeMelhora: { type: "STRING" }
+                    }
+                }
             }
-        }
-       }
-      }); 
+        );
 
         // O conteúdo do JSON vem como uma string no campo 'text'
-        const rawJson = response.text;
+        const rawJson = correctionResponse.text;
         const correctionData = parseJsonSafely(rawJson);
-
         if (!correctionData) {
             throw new Error("A IA retornou um formato de correção inválido (JSON não pôde ser lido).");
         }

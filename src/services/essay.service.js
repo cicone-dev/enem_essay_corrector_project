@@ -3,6 +3,7 @@
 import { PrismaClient } from '@prisma/client';
 import { GoogleGenerativeAI } from '@google/generative-ai';
 
+// Usamos gemini-2.5-flash como o modelo mais rápido e econômico
 const modelName = process.env.GEMINI_MODEL_NAME || 'gemini-2.5-flash';
 
 const genAI = new GoogleGenerativeAI(process.env.GEMINI_API_KEY);
@@ -14,7 +15,6 @@ const prisma = new PrismaClient();
  * Gera o prompt detalhado para o modelo Gemini.
  */
 const generatePrompt = (essayText, essayTopic) => {
-    // Mantém a lógica do prompt inalterada
     return `
     Você é um corretor HUMANO de redações de alta performance, especializado na correção de redações do ENEM por anos.
     Sua tarefa é avaliar a redação de acordo com as cinco competências do ENEM (C1 a C5) e fornecer uma análise textual completa.
@@ -30,11 +30,10 @@ const generatePrompt = (essayText, essayTopic) => {
 };
 
 /**
- * 🌟 CORREÇÃO CRÍTICA: Tenta fazer o parse de uma string JSON, limpando a resposta do modelo.
- * Adiciona verificação para null/undefined para evitar o erro '.trim()'.
+ * Corrige o JSON de saída e previne erros de .trim() no dashboard.
  */
 const parseJsonSafely = (jsonString) => {
-    // 🚨 FIX CRÍTICO: Se a string for nula ou indefinida, retorna null imediatamente
+    // 🚨 FIX: Se a string for nula ou indefinida, retorna null
     if (!jsonString || typeof jsonString !== 'string') {
         return null;
     }
@@ -50,7 +49,6 @@ const parseJsonSafely = (jsonString) => {
         return JSON.parse(cleanString);
     } catch (e) {
         console.error("🚨 Erro ao parsear JSON da correção:", e.message);
-        console.error("String JSON que falhou (início):", cleanString.substring(0, 500) + '...');
         return null;
     }
 };
@@ -60,75 +58,69 @@ const parseJsonSafely = (jsonString) => {
 
 /**
  * Processa a submissão e correção de uma nova redação.
- * 🌟 CORREÇÃO DE ARGUMENTOS: Aceita o objeto de dados (essayData) e destrutura.
  */
-// 🚨 FIX CRÍTICO 1: Mudar a assinatura para receber 'essayData' (o corpo da requisição)
 export const submitEssay = async (userId, essayData) => { 
     try {
-        // Assume que essayData é { essayTopic, essayText } (baseado em NewEssayPage.jsx)
+        // 🚨 FIX DE VALIDAÇÃO: Garante que a desestruturação está correta
         const { essayTopic, essayText } = essayData; 
         
-        // Validação rápida para evitar salvar dados incompletos ou chamar a IA sem conteúdo
-        if (!essayTopic || !essayText) {
+        if (!essayTopic || !essayText || essayTopic.trim() === '' || essayText.trim() === '') {
              throw new Error("Tópico ou texto da redação está faltando na submissão.");
         }
         
-        // 1. Cria a redação no banco de dados
+        // 1. Cria a redação no banco de dados (PRISMA FIX)
         const newEssay = await prisma.essay.create({
             data: {
                 userId,
-                // 🚨 FIX CRÍTICO 2: Mapeamento correto para o Prisma
-                topic: essayTopic, // Nome do campo 'topic'
-                text: essayText,   // Nome do campo 'text' (corpo da redação)
+                topic: essayTopic, // Mapeamento correto para o Prisma
+                text: essayText,   // Mapeamento correto para o Prisma
             },
         });
 
- // 2. Gera o prompt para o modelo
+        // 2. Gera o prompt para o modelo
         const prompt = generatePrompt(essayText, essayTopic);
 
-        // 3. Chamada à API do Gemini (FIX CRÍTICO APLICADO AQUI)
-        // 🚨 NOVO FIX: Usar a sintaxe de dois argumentos (contents, config)
-        
+        // 3. Chamada à API do Gemini
         const model = genAI.getGenerativeModel({ model: modelName });
 
-        const correctionResponse = await model.generateContent(
-            // 1º ARGUMENTO: CONTENTS
-            [{ role: "user", parts: [{ text: prompt }] }], 
+        // 🚨 FIX CRÍTICO GEMINI: Usa a sintaxe de texto puro, a mais robusta e compatível
+        const correctionResponse = await model.generateContent({
+            // Passa o prompt como texto simples, sem estrutura de chat
+            contents: [prompt], 
             
-            // 2º ARGUMENTO: CONFIG
-            {
+            config: {
                 responseMimeType: "application/json",
                 responseSchema: {
                     type: "OBJECT",
                     properties: {
-                        competencias: { type: "OBJECT" }, 
-                        total: { type: "NUMBER" },
-                        feedbackGeral: { type: "STRING" }, 
-                        pontosPositivos: { type: "STRING" },
-                        pontosA_Melhorar: { type: "STRING" }, 
-                        analiseTextual: { type: "OBJECT" },
+                        competencias: { type: "OBJECT" }, total: { type: "NUMBER" },
+                        feedbackGeral: { type: "STRING" }, pontosPositivos: { type: "STRING" },
+                        pontosA_Melhorar: { type: "STRING" }, analiseTextual: { type: "OBJECT" },
                         sugestoesDeMelhora: { type: "STRING" }
                     }
                 }
             }
-        );
+        });
 
-        // O conteúdo do JSON vem como uma string no campo 'text'
+        // 4. Processamento da Resposta
         const rawJson = correctionResponse.text;
         const correctionData = parseJsonSafely(rawJson);
+
         if (!correctionData) {
             throw new Error("A IA retornou um formato de correção inválido (JSON não pôde ser lido).");
         }
 
-        // 4. Cria a correção no banco de dados (usando a lógica original de salvar o JSON como string)
+        // 5. Cria a correção no banco de dados
         const correction = await prisma.correction.create({
             data: {
                 essayId: newEssay.id,
-                content: JSON.stringify(correctionData),
+                // Assumindo que você usa notes: Json e total: Int
+                notes: correctionData,
+                total: correctionData.total || 0, // Garante que a nota total é salva
             },
         });
         
-        // 5. Retorna a redação com o conteúdo da correção para o frontend
+        // 6. Retorna a redação com o conteúdo da correção para o frontend
         return {
             ...newEssay,
             latestCorrection: correctionData,
@@ -136,18 +128,23 @@ export const submitEssay = async (userId, essayData) => {
         };
 
     } catch (error) {
-        // Loga o erro, incluindo o nome, para melhor diagnóstico
         console.error("🚨 Erro final no submitEssay:", error.name, error.message);
         throw new Error(`Falha ao submeter a redação: ${error.message}`);
     }
 };
 
-// --- Funções de Leitura (Corrigidas para usar o parseJsonSafely atualizado) ---
+// --- Funções de Leitura ---
 
 /**
  * Busca uma redação específica por ID.
  */
 export const getEssayById = async (essayId, userId) => {
+    // 🚨 FIX CRÍTICO PRISMA: Adiciona validação de ID para evitar Malformed ObjectID
+    // IDs do MongoDB são strings hexadecimais de 24 caracteres
+    if (!essayId || typeof essayId !== 'string' || essayId.length !== 24 || !/^[0-9a-fA-F]{24}$/.test(essayId)) {
+        throw new Error("ID de redação inválido ou incompleto.");
+    }
+    
     try {
         const essay = await prisma.essay.findUnique({
             where: { id: essayId, userId: userId },
@@ -160,8 +157,8 @@ export const getEssayById = async (essayId, userId) => {
 
         if (essay.corrections && essay.corrections.length > 0) {
             const latestCorrection = essay.corrections[0];
-            // O parseJsonSafely agora lida com o conteúdo nulo
-            essay.latestCorrection = parseJsonSafely(latestCorrection.content);
+            // Usa o campo 'notes' que foi corrigido no submitEssay
+            essay.latestCorrection = parseJsonSafely(JSON.stringify(latestCorrection.notes)); 
         } else {
             essay.latestCorrection = null;
         }
@@ -173,7 +170,7 @@ export const getEssayById = async (essayId, userId) => {
 };
 
 /**
- * Busca o histórico simples de redações.
+ * Busca o histórico simples de redações. (Funções de leitura agora mais robustas)
  */
 export const getEssayHistory = async (userId) => {
     try {
@@ -185,13 +182,14 @@ export const getEssayHistory = async (userId) => {
 
         return essays.map(essay => {
             const correction = essay.corrections[0];
-            // O parseJsonSafely agora lida com o conteúdo nulo
-            const parsedContent = correction ? parseJsonSafely(correction.content) : null;
+            const parsedContent = correction ? parseJsonSafely(JSON.stringify(correction.notes)) : null;
 
             return {
                 id: essay.id,
                 topic: essay.topic,
                 createdAt: essay.createdAt,
+                // Usa a nota total salva no campo 'total'
+                total: correction?.total || 0, 
                 correction: parsedContent
             };
         }).filter(essay => essay.correction !== null);
@@ -202,7 +200,7 @@ export const getEssayHistory = async (userId) => {
 };
 
 /**
- * Calcula as métricas de Analytics.
+ * Calcula as métricas de Analytics. (Mantém a lógica robusta)
  */
 export const getEssayAnalytics = async (userId) => {
     try {
@@ -214,9 +212,13 @@ export const getEssayAnalytics = async (userId) => {
         const gradedEssays = allEssays
             .filter(essay => essay.corrections.length > 0)
             .map(essay => {
-                // O parseJsonSafely agora lida com o conteúdo nulo
-                const parsedContent = parseJsonSafely(essay.corrections[0].content);
-                return { ...essay, latestCorrection: parsedContent };
+                const parsedContent = parseJsonSafely(JSON.stringify(essay.corrections[0].notes));
+                return { 
+                    ...essay, 
+                    latestCorrection: parsedContent,
+                    // Usa a nota total do DB
+                    total: essay.corrections[0].total || 0 
+                };
             })
             .filter(essay => essay.latestCorrection !== null);
 
@@ -226,14 +228,12 @@ export const getEssayAnalytics = async (userId) => {
             return { totalEssays: 0, averageScore: 0, scoreHistory: [], competenceAverages: [], latestEssays: [], totalWords: 0 };
         }
 
-        const totalScoreSum = gradedEssays.reduce((sum, essay) => sum + (essay.latestCorrection?.total || 0), 0);
+        const totalScoreSum = gradedEssays.reduce((sum, essay) => sum + (essay.total || 0), 0);
         const averageScore = Math.round(totalScoreSum / totalEssays) || 0;
-
-        // O restante da lógica permanece robusta (com optional chaining '?.' e '|| 0')
 
         const scoreHistory = gradedEssays.map(essay => ({
             date: new Date(essay.createdAt).toLocaleDateString('pt-BR', { day: '2-digit', month: 'short' }),
-            total: essay.latestCorrection.total || 0,
+            total: essay.total || 0,
         }));
 
         const competenceSum = gradedEssays.reduce((acc, essay) => {
@@ -254,11 +254,10 @@ export const getEssayAnalytics = async (userId) => {
         ];
 
         const latestEssays = gradedEssays.slice(-3).reverse().map(essay => ({
-            id: essay.id, topic: essay.topic, total: essay.latestCorrection.total || 0, createdAt: essay.createdAt
+            id: essay.id, topic: essay.topic, total: essay.total || 0, createdAt: essay.createdAt
         }));
 
         const totalWords = gradedEssays.reduce((sum, essay) => sum + (essay.text?.split(/\s+/).length || 0), 0);
-
 
         return { totalEssays, averageScore, scoreHistory, competenceAverages, latestEssays, totalWords };
 
@@ -269,7 +268,7 @@ export const getEssayAnalytics = async (userId) => {
 };
 
 /**
- * Busca as conquistas e verifica o status de desbloqueio.
+ * Busca as conquistas e verifica o status de desbloqueio. (Mantém a lógica robusta)
  */
 export const getUserAchievements = async (userId) => {
     try {
@@ -281,8 +280,7 @@ export const getUserAchievements = async (userId) => {
         const gradedEssays = essays.filter(e => e.corrections.length > 0);
 
         const essayGrades = gradedEssays
-            // O parseJsonSafely agora lida com o conteúdo nulo
-            .map(e => parseJsonSafely(e.corrections[0].content)?.total)
+            .map(e => e.corrections[0].total)
             .filter(score => score != null);
 
         const achievements = [
@@ -290,9 +288,10 @@ export const getUserAchievements = async (userId) => {
             { id: 'five_essays', title: 'Cinco na Conta', description: 'Submeta 5 redações.', unlocked: essayGrades.length >= 5 },
             { id: 'road_to_1000', title: 'Quase Perfeito', description: 'Alcance uma nota de 900+.', unlocked: essayGrades.some(grade => grade >= 900) },
         ];
-
+        
+        // Lógica de C5: usa o JSON parseado para buscar a nota da competência
         const c5Scores = gradedEssays
-            .map(e => parseJsonSafely(e.corrections[0].content)?.competencias?.c5?.nota)
+            .map(e => parseJsonSafely(JSON.stringify(e.corrections[0].notes))?.competencias?.c5?.nota)
             .filter(score => score != null);
 
         if (c5Scores.some(score => score === 200)) {

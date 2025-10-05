@@ -88,20 +88,21 @@ export const submitEssay = async (userId, essayData) => {
 
         // 3. Chamada à API do Gemini (inalterado)
         const response = await genAI.getGenerativeModel({ model: modelName }).generateContent({
-            contents: [{ role: "user", parts: [{ text: prompt }] }],
-            config: {
-                responseMimeType: "application/json",
-                responseSchema: {
-                    type: "OBJECT",
-                    properties: {
-                        competencias: { type: "OBJECT" }, total: { type: "NUMBER" },
-                        feedbackGeral: { type: "STRING" }, pontosPositivos: { type: "STRING" },
-                        pontosA_Melhorar: { type: "STRING" }, analiseTextual: { type: "OBJECT" },
-                        sugestoesDeMelhora: { type: "STRING" }
-                    }
-                }
+        contents: [{ role: "user", parts: [{ text: prompt }] }],
+        // ⬇️ O 'config' deve ser um parâmetro irmão de 'contents'
+        config: {
+        responseMimeType: "application/json",
+        responseSchema: {
+            type: "OBJECT",
+            properties: {
+                competencias: { type: "OBJECT" }, total: { type: "NUMBER" },
+                feedbackGeral: { type: "STRING" }, pontosPositivos: { type: "STRING" },
+                pontosA_Melhorar: { type: "STRING" }, analiseTextual: { type: "OBJECT" },
+                sugestoesDeMelhora: { type: "STRING" }
             }
-        });
+        }
+       }
+      }); 
 
         // O conteúdo do JSON vem como uma string no campo 'text'
         const rawJson = response.text;

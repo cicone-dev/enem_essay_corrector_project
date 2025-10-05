@@ -363,7 +363,7 @@ export const getEssayAnalytics = async (userId) => {
 /**
  * ATUALIZADO: Busca as conquistas e verifica o status de desbloqueio.
  */
-export const getAchievements = async (userId) => {
+export const getUserAchievements = async (userId) => {
     try {
         const essays = await prisma.essay.findMany({
             where: { userId },

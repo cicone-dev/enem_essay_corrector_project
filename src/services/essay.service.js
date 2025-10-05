@@ -60,17 +60,31 @@ const parseJsonSafely = (jsonString) => {
         return null;
     }
     
-    let cleanString = jsonString.trim();
+    // Remove blocos de código Markdown (```json ... ```) e caracteres de controle
+    let cleanString = jsonString
+        .replace(/^```json\s*|```$/g, '')
+        .trim();
 
-    // Remove blocos de código Markdown
-    if (cleanString.startsWith("```")) {
-        cleanString = cleanString.replace(/^```(json)?\s*|```$/g, '').trim();
-    }
-
+    // Se o Gemini retornou a resposta como uma string pura, mas válida (sem ````)
+    // Se o JSON for muito complexo, essa limpeza é crucial.
+    
     try {
+        // Tenta fazer o parse do JSON limpo
         return JSON.parse(cleanString);
     } catch (e) {
-        // console.error("🚨 Erro ao parsear JSON da correção:", e.message);
+        // Se a string não for JSON válido, tenta encontrar o bloco JSON na resposta.
+        // Isso é um fallback caso o modelo ignore o responseMimeType e adicione texto extra.
+        const jsonMatch = cleanString.match(/\{[\s\S]*\}/);
+        if (jsonMatch) {
+            try {
+                return JSON.parse(jsonMatch[0]);
+            } catch (e2) {
+                console.error("🚨 Erro de Parse no Fallback:", e2.message);
+                return null; // Falha em todos os parses
+            }
+        }
+        
+        console.error("🚨 Erro ao parsear JSON da correção:", e.message);
         return null;
     }
 };

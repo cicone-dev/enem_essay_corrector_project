@@ -97,8 +97,9 @@ const parseJsonSafely = (jsonString) => {
  */
 export const submitEssay = async (userId, essayData) => { 
     try {
-        // Desestruturação de acordo com o que o routes.js envia
-        const { essayTopic, essayText } = essayData; 
+        // 🚨 CORREÇÃO CRÍTICA: Desestrutura as chaves 'text' e 'topic' enviadas pelo front 
+        // e renomeia para 'essayText' e 'essayTopic' (mantendo a consistência do serviço)
+        const { topic: essayTopic, text: essayText } = essayData;
         
         // Validação
         if (!essayTopic || !essayText || essayTopic.trim() === '' || essayText.trim() === '') {

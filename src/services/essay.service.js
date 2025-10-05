@@ -15,17 +15,40 @@ const prisma = new PrismaClient();
  * Gera o prompt detalhado para o modelo Gemini.
  */
 const generatePrompt = (essayText, essayTopic) => {
+    // 🌟 Lógica do prompt ORIGINAL (suas especificações) preservada
     return `
     Você é um corretor HUMANO de redações de alta performance, especializado na correção de redações do ENEM por anos.
     Sua tarefa é avaliar a redação de acordo com as cinco competências do ENEM (C1 a C5) e fornecer uma análise textual completa.
     
+    A nota de cada competência deve ser um múltiplo de 40 (0, 40, 80, 120, 160, 200). A nota TOTAL deve ser a soma das 5 notas.
+
     O TEMA da redação é: "${essayTopic}".
     A REDAÇÃO submetida é:
     ---
     ${essayText}
     ---
     
-    Sua resposta DEVE ser estruturada EXCLUSIVAMENTE em JSON e seguir o formato...
+    Sua resposta DEVE ser estruturada EXCLUSIVAMENTE em JSON e seguir este formato:
+    {
+      "competencias": {
+        "c1": { "nota": number, "comentario": string },
+        "c2": { "nota": number, "comentario": string },
+        "c3": { "nota": number, "comentario": string },
+        "c4": { "nota": number, "comentario": string },
+        "c5": { "nota": number, "comentario": string }
+      },
+      "total": number,
+      "feedbackGeral": string,
+      "pontosPositivos": string,
+      "pontosA_Melhorar": string,
+      "analiseTextual": {
+        "coesaoEConectores": string,
+        "vocabulario": string,
+        "ortografia": string,
+        "repertorioSociocultural": string
+      },
+      "sugestoesDeMelhora": string
+    }
     `;
 };
 
@@ -33,14 +56,13 @@ const generatePrompt = (essayText, essayTopic) => {
  * Corrige o JSON de saída e previne erros de .trim() no dashboard.
  */
 const parseJsonSafely = (jsonString) => {
-    // 🚨 FIX: Se a string for nula ou indefinida, retorna null
     if (!jsonString || typeof jsonString !== 'string') {
         return null;
     }
     
     let cleanString = jsonString.trim();
 
-    // Remove blocos de código Markdown (```json...``` ou ```...```)
+    // Remove blocos de código Markdown
     if (cleanString.startsWith("```")) {
         cleanString = cleanString.replace(/^```(json)?\s*|```$/g, '').trim();
     }
@@ -48,7 +70,7 @@ const parseJsonSafely = (jsonString) => {
     try {
         return JSON.parse(cleanString);
     } catch (e) {
-        console.error("🚨 Erro ao parsear JSON da correção:", e.message);
+        // console.error("🚨 Erro ao parsear JSON da correção:", e.message);
         return null;
     }
 };
@@ -61,19 +83,20 @@ const parseJsonSafely = (jsonString) => {
  */
 export const submitEssay = async (userId, essayData) => { 
     try {
-        // 🚨 FIX DE VALIDAÇÃO: Garante que a desestruturação está correta
+        // Desestruturação de acordo com o que o routes.js envia
         const { essayTopic, essayText } = essayData; 
         
+        // Validação
         if (!essayTopic || !essayText || essayTopic.trim() === '' || essayText.trim() === '') {
              throw new Error("Tópico ou texto da redação está faltando na submissão.");
         }
         
-        // 1. Cria a redação no banco de dados (PRISMA FIX)
+        // 1. Cria a redação no banco de dados (Status 'Pending' ou similar)
         const newEssay = await prisma.essay.create({
             data: {
                 userId,
-                topic: essayTopic, // Mapeamento correto para o Prisma
-                text: essayText,   // Mapeamento correto para o Prisma
+                topic: essayTopic,
+                text: essayText,
             },
         });
 
@@ -83,19 +106,33 @@ export const submitEssay = async (userId, essayData) => {
         // 3. Chamada à API do Gemini
         const model = genAI.getGenerativeModel({ model: modelName });
 
-        // 🚨 FIX CRÍTICO GEMINI: Usa a sintaxe de texto puro, a mais robusta e compatível
+        // 🚨 CORREÇÃO CRÍTICA: Usa a sintaxe de chat COMPLETA (canônica)
         const correctionResponse = await model.generateContent({
-            // Passa o prompt como texto simples, sem estrutura de chat
-            contents: [prompt], 
             
+            // Contents no formato canônico que o servidor espera para Structured Output
+            contents: [{ role: "user", parts: [{ text: prompt }] }],
+            
+            // Configuração como propriedade irmã
             config: {
                 responseMimeType: "application/json",
+                // 🌟 responseSchema preserva o formato ORIGINAL (suas especificações)
                 responseSchema: {
                     type: "OBJECT",
                     properties: {
-                        competencias: { type: "OBJECT" }, total: { type: "NUMBER" },
-                        feedbackGeral: { type: "STRING" }, pontosPositivos: { type: "STRING" },
-                        pontosA_Melhorar: { type: "STRING" }, analiseTextual: { type: "OBJECT" },
+                        competencias: { type: "OBJECT" }, 
+                        total: { type: "NUMBER" },
+                        feedbackGeral: { type: "STRING" }, 
+                        pontosPositivos: { type: "STRING" },
+                        pontosA_Melhorar: { type: "STRING" }, 
+                        analiseTextual: { 
+                            type: "OBJECT",
+                            properties: {
+                                coesaoEConectores: { type: "STRING" },
+                                vocabulario: { type: "STRING" },
+                                ortografia: { type: "STRING" },
+                                repertorioSociocultural: { type: "STRING" }
+                            }
+                        },
                         sugestoesDeMelhora: { type: "STRING" }
                     }
                 }
@@ -106,17 +143,16 @@ export const submitEssay = async (userId, essayData) => {
         const rawJson = correctionResponse.text;
         const correctionData = parseJsonSafely(rawJson);
 
-        if (!correctionData) {
-            throw new Error("A IA retornou um formato de correção inválido (JSON não pôde ser lido).");
+        if (!correctionData || !correctionData.competencias || correctionData.total === undefined) {
+            throw new Error("A IA retornou um formato de correção inválido. Tente novamente.");
         }
-
+        
         // 5. Cria a correção no banco de dados
         const correction = await prisma.correction.create({
             data: {
                 essayId: newEssay.id,
-                // Assumindo que você usa notes: Json e total: Int
-                notes: correctionData,
-                total: correctionData.total || 0, // Garante que a nota total é salva
+                notes: correctionData, // Salva o objeto JSON completo
+                total: correctionData.total || 0,
             },
         });
         
@@ -129,18 +165,16 @@ export const submitEssay = async (userId, essayData) => {
 
     } catch (error) {
         console.error("🚨 Erro final no submitEssay:", error.name, error.message);
+        // Garante que o erro do Gemini é retornado para o frontend
         throw new Error(`Falha ao submeter a redação: ${error.message}`);
     }
 };
-
-// --- Funções de Leitura ---
 
 /**
  * Busca uma redação específica por ID.
  */
 export const getEssayById = async (essayId, userId) => {
-    // 🚨 FIX CRÍTICO PRISMA: Adiciona validação de ID para evitar Malformed ObjectID
-    // IDs do MongoDB são strings hexadecimais de 24 caracteres
+    // 🚨 FIX PRISMA: Adiciona validação de ID para evitar Malformed ObjectID
     if (!essayId || typeof essayId !== 'string' || essayId.length !== 24 || !/^[0-9a-fA-F]{24}$/.test(essayId)) {
         throw new Error("ID de redação inválido ou incompleto.");
     }
@@ -157,7 +191,8 @@ export const getEssayById = async (essayId, userId) => {
 
         if (essay.corrections && essay.corrections.length > 0) {
             const latestCorrection = essay.corrections[0];
-            // Usa o campo 'notes' que foi corrigido no submitEssay
+            // O campo notes é Json, precisa ser desserializado (se não for feito automaticamente pelo Prisma)
+            // Usamos parseJsonSafely para garantir compatibilidade com o formato JSON da correção
             essay.latestCorrection = parseJsonSafely(JSON.stringify(latestCorrection.notes)); 
         } else {
             essay.latestCorrection = null;
@@ -169,9 +204,7 @@ export const getEssayById = async (essayId, userId) => {
     }
 };
 
-/**
- * Busca o histórico simples de redações. (Funções de leitura agora mais robustas)
- */
+
 export const getEssayHistory = async (userId) => {
     try {
         const essays = await prisma.essay.findMany({

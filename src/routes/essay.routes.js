@@ -30,7 +30,7 @@ router.get("/history", protectRoute, async (req, res) => {
         const history = await getEssayHistory(userId);
         res.status(200).json(history);
     } catch (error) {
-        res.status(500).json({ message: error.message });
+        return res.status(500).json({ message: error.message }); 
     }
 });
 
@@ -41,7 +41,7 @@ router.get("/analytics", protectRoute, async (req, res) => {
         const analytics = await getEssayAnalytics(userId);
         res.status(200).json(analytics);
     } catch (error) {
-        res.status(500).json({ message: error.message });
+        return res.status(500).json({ message: error.message }); 
     }
 });
 
@@ -52,7 +52,7 @@ router.get("/achievements", protectRoute, async (req, res) => {
         const achievements = await getUserAchievements(userId);
         res.status(200).json(achievements);
     } catch (error) {
-        res.status(500).json({ message: error.message });
+        return res.status(500).json({ message: error.message }); 
     }
 });
 

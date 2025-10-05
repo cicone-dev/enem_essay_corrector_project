@@ -106,16 +106,14 @@ export const submitEssay = async (userId, essayData) => {
         // 3. Chamada à API do Gemini
         const model = genAI.getGenerativeModel({ model: modelName });
 
-        // 🚨 CORREÇÃO CRÍTICA: Usa a sintaxe de chat COMPLETA (canônica)
+        // Chamada à API do Gemini com a estrutura CORRETA
         const correctionResponse = await model.generateContent({
             
-            // Contents no formato canônico que o servidor espera para Structured Output
             contents: [{ role: "user", parts: [{ text: prompt }] }],
             
-            // Configuração como propriedade irmã
-            config: {
+            // <--- CORREÇÃO AQUI: Renomeie "config" para "generationConfig".
+            generationConfig: {
                 responseMimeType: "application/json",
-                // 🌟 responseSchema preserva o formato ORIGINAL (suas especificações)
                 responseSchema: {
                     type: "OBJECT",
                     properties: {

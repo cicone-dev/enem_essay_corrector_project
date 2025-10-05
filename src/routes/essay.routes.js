@@ -1,6 +1,6 @@
 import { Router } from 'express';
 import { 
-    correctEssay, 
+    submitEssay, 
     getEssayHistory, 
     getEssayAnalytics, 
     getUserAchievements,
@@ -16,7 +16,7 @@ router.post("/", protectRoute, async (req, res) => {
     try {
         const userId = req.user.id;
         const essayData = req.body;
-        const correction = await correctEssay(userId, essayData);
+        const correction = await submitEssay(userId, essayData);
         res.status(200).json(correction);
     } catch (error) {
         res.status(500).json({ message: error.message });

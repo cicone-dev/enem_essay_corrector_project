@@ -3,9 +3,11 @@ import {
     correctEssay, 
     getEssayHistory, 
     getEssayAnalytics, 
-    getUserAchievements 
+    getUserAchievements,
+    getEssayById
 } from "../services/essay.service.js"; 
 import { protectRoute } from "../middlewares/auth.middleware.js";
+
 
 const router = Router();
 

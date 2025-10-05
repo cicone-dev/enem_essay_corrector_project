@@ -117,8 +117,49 @@ export const submitEssay = async (userId, essayData) => {
                 responseSchema: {
                     type: "OBJECT",
                     properties: {
-                        competencias: { type: "OBJECT" }, 
-                        total: { type: "NUMBER" },
+                        competencias: {
+                            type: "OBJECT",
+                            // *** ESTE BLOCO 'properties' É O QUE FALTAVA! ***
+                            properties: {
+                                c1: {
+                                    type: "OBJECT",
+                                    properties: { 
+                                        nota: { type: "NUMBER", description: "Nota de 0, 40, 80, 120, 160 ou 200." }, 
+                                        comentario: { type: "STRING" } 
+                                    } 
+                                },
+                                c2: {
+                                    type: "OBJECT",
+                                    properties: { 
+                                        nota: { type: "NUMBER", description: "Nota de 0, 40, 80, 120, 160 ou 200." }, 
+                                        comentario: { type: "STRING" } 
+                                    } 
+                                },
+                                c3: {
+                                    type: "OBJECT",
+                                    properties: { 
+                                        nota: { type: "NUMBER", description: "Nota de 0, 40, 80, 120, 160 ou 200." }, 
+                                        comentario: { type: "STRING" } 
+                                    } 
+                                },
+                                c4: {
+                                    type: "OBJECT",
+                                    properties: { 
+                                        nota: { type: "NUMBER", description: "Nota de 0, 40, 80, 120, 160 ou 200." }, 
+                                        comentario: { type: "STRING" } 
+                                    } 
+                                },
+                                c5: {
+                                    type: "OBJECT",
+                                    properties: { 
+                                        nota: { type: "NUMBER", description: "Nota de 0, 40, 80, 120, 160 ou 200." }, 
+                                        comentario: { type: "STRING" } 
+                                    } 
+                                }
+                            }
+                        }, 
+                        // Fim do bloco 'competencias' corrigido
+                                                total: { type: "NUMBER" },
                         feedbackGeral: { type: "STRING" }, 
                         pontosPositivos: { type: "STRING" },
                         pontosA_Melhorar: { type: "STRING" }, 

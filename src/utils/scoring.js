@@ -1,1 +1,0 @@
-//funções de cálculo/refinamento das notas

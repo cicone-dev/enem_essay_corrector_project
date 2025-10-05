@@ -124,29 +124,35 @@ export const login = async (req, res) => {
 export const updateProfilePic = async (req, res) => {
     try {
         if (!req.file) {
-            return res.status(400).json({ message: "No file uploaded." });
+            return res.status(400).json({ message: "Nenhum arquivo enviado. Por favor, selecione uma imagem." });
         }
 
         let user = req.user;
         
-        // A lógica de upload de imagem para o Cloudinary usando buffer
-        const result = await cloudinary.uploader.upload(
-            `data:${req.file.mimetype};base64,${req.file.buffer.toString('base64')}`
-        );
+        // 🚨 CORREÇÃO CRÍTICA: Sintaxe da Data URI
+        // 1. Converte o Buffer em uma string Base64 limpa
+        const base64Image = req.file.buffer.toString('base64');
+        
+        // 2. Monta a Data URI com o tipo MIME e a codificação corretas.
+        const dataURI = `data:${req.file.mimetype};base64,${base64Image}`;
+
+        // A lógica de upload de imagem para o Cloudinary
+        const result = await cloudinary.uploader.upload(dataURI, {
+            folder: "essay_corrector_profile_pics", // Boa prática de organização
+            public_id: user.id, // Usa o ID do usuário para facilitar o gerenciamento
+            overwrite: true, // Garante que a foto antiga seja substituída
+        });
+        
+        // ... (restante da lógica de verificação e atualização do Prisma)
         
         if (!result || !result.secure_url) {
-            return res.status(500).json({ message: "Failed to upload to Cloudinary." });
+            return res.status(500).json({ message: "Falha ao enviar a imagem para o Cloudinary. Tente novamente." });
         }
 
         user = await prisma.user.update({
             where: { id: user.id },
             data: { profilePic: result.secure_url },
-            select: {
-                id: true,
-                name: true,
-                email: true,
-                profilePic: true,
-            },
+            select: { id: true, name: true, email: true, profilePic: true },
         });
 
         res.status(200).json({
@@ -157,7 +163,8 @@ export const updateProfilePic = async (req, res) => {
         });
 
     } catch (error) {
-        console.error("Error updating profile picture:", error.message);
-        res.status(500).json({ message: "Error updating profile picture." });
+        console.error("Erro ao atualizar a foto de perfil:", error.message);
+        // 🚨 CORREÇÃO: Adicionar 'return' para estabilidade
+        return res.status(500).json({ message: "Erro interno ao atualizar a foto de perfil." });
     }
 };

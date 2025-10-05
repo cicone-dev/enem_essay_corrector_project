@@ -39,7 +39,7 @@ export const protectRoute = async (req, res, next) => {
     } catch (error) {
         // CORREÇÃO CRÍTICA: Se o token for inválido, expirado ou houver qualquer erro de auth,
         // retornamos 401 e o 'return' força o middleware a PARAR IMEDIATAMENTE.
-        console.error("Authentication failed:", error.message);
+        console.error("Error in protectRoute middleware:", error.message);
         return res.status(401).json({ message: "Token is invalid, expired, or authorization failed." });
     }
 };

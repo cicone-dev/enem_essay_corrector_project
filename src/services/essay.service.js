@@ -91,29 +91,37 @@ const generatePrompt = (essayText, essayTopic) => {
 };
 
 /**
- * Tenta fazer o parse de uma string JSON, limpando a resposta do modelo.
- * Adiciona verificação para null/undefined para evitar o erro '.trim()'.
+ * 🌟 CRÍTICO: Tenta fazer o parse de uma string JSON, limpando a resposta do modelo, 
+ * mas também aceitando e retornando objetos que já foram parseados pelo Prisma (tipo Json).
  */
-const parseJsonSafely = (jsonString) => {
-    if (!jsonString) return null;
+const parseJsonSafely = (data) => {
+    // Se for nulo ou indefinido, retorna nulo.
+    if (!data) return null;
 
-    // Se já for um objeto, retorna-o diretamente.
-    if (typeof jsonString === 'object') return jsonString;
+    // Se já for um objeto (e não um Array), retorna-o diretamente. O Prisma pode 
+    // retornar o tipo 'Json' já como objeto em alguns ambientes/drivers.
+    if (typeof data === 'object' && !Array.isArray(data)) return data;
 
-    try {
-        let cleanedString = jsonString.trim();
-        // Remove o bloco de código markdown
-        if (cleanedString.startsWith('```json')) {
-            cleanedString = cleanedString.substring(7);
+    // Se for uma string (caso mais comum vindo da API ou de string JSON do banco)
+    if (typeof data === 'string') {
+        try {
+            let cleanedString = data.trim();
+            // Remove o bloco de código markdown (```json ... ```) se existir
+            if (cleanedString.startsWith('```json')) {
+                cleanedString = cleanedString.substring(7);
+            }
+            if (cleanedString.endsWith('```')) {
+                cleanedString = cleanedString.substring(0, cleanedString.length - 3);
+            }
+            return JSON.parse(cleanedString.trim());
+        } catch (e) {
+             console.error("Erro ao fazer o parse do JSON da correção (T2):", e.message);
+             return null;
         }
-        if (cleanedString.endsWith('```')) {
-            cleanedString = cleanedString.substring(0, cleanedString.length - 3);
-        }
-        return JSON.parse(cleanedString.trim());
-    } catch (e) {
-        console.error("Erro ao fazer o parse do JSON da correção:", e.message);
-        return null;
     }
+    
+    // Se for outro tipo não esperado (como Array), retorna nulo
+    return null;
 };
 
 /**
@@ -200,7 +208,6 @@ export const submitEssay = async (userId, essayData) => {
         }
         
         // 2. Salva a correção associada à redação (Correction)
-        // 🚨 FIX CRÍTICO: Removendo o campo 'content' que causou o erro de Prisma
         const correctionRecord = await prisma.correction.create({
             data: {
                 essayId: essay.id,
@@ -210,10 +217,12 @@ export const submitEssay = async (userId, essayData) => {
         });
 
         // Retorna o objeto completo da correção para o frontend
+        // Adiciona a nota completa, competências, etc., ao objeto retornado para 
+        // a tela de sucesso ter todos os dados
         return {
             ...correctionRecord,
-            notes: parsedCorrection, // Garante que o frontend receba o objeto parsed
-            content: rawJsonCorrection, // Incluímos o 'content' na resposta HTTP, mas não no DB
+            // 🚨 CRÍTICO: Garante que 'notes' no retorno seja o OBJETO já parseado
+            notes: parsedCorrection, 
             essay,
         };
 
@@ -246,16 +255,16 @@ export const getEssayHistory = async (userId) => {
     return history.filter(essay => essay.corrections.length > 0)
                   .map(essay => {
                       const latestCorrection = essay.corrections[0];
-                      // Assumimos que 'notes' contém o objeto JSON (ou que o Prisma o parseou)
+                      // 🚨 CORREÇÃO: Lê os dados estruturados do campo 'notes'
                       const parsedNotes = parseJsonSafely(latestCorrection.notes);
 
                       return {
                           ...essay,
+                          // Garante que o frontend receba o total corretamente, mesmo que 
+                          // já esteja no campo 'total' da correção.
                           correction: {
                               ...latestCorrection,
                               notes: parsedNotes, 
-                              // O campo 'content' não existe mais no DB, mas podemos criar uma propriedade
-                              // para consistência (embora notes já contenha o objeto).
                           }
                       };
                   })
@@ -284,7 +293,7 @@ export const getEssayById = async (essayId, userId) => {
     
     const correctionsParsed = essay.corrections.map(correction => ({
         ...correction,
-        // Garante que 'notes' seja o objeto JSON parseado (usa parseJsonSafely em caso de string)
+        // 🚨 CORREÇÃO: Garante que 'notes' seja o objeto JSON parseado
         notes: parseJsonSafely(correction.notes)
     }));
 
@@ -307,7 +316,7 @@ export const getEssayAnalytics = async (userId) => {
         });
 
         const gradedEssays = essays.filter(e => e.corrections.length > 0);
-        // Agora busca a nota total diretamente de notes
+        // 🚨 CORREÇÃO: Busca o total da nota do campo 'notes'
         const essayGrades = gradedEssays
             .map(e => parseJsonSafely(e.corrections[0].notes)?.total)
             .filter(score => score != null);
@@ -322,7 +331,7 @@ export const getEssayAnalytics = async (userId) => {
 
         const recentGrades = essayGrades.slice(0, 5).reverse();
         
-        // Busca as notas de competências em notes
+        // 🚨 CORREÇÃO: Busca as notas de competências em 'notes'
         const competenceScores = gradedEssays.map(e => 
             parseJsonSafely(e.corrections[0].notes)?.competencias
         ).filter(c => c != null);
@@ -331,7 +340,8 @@ export const getEssayAnalytics = async (userId) => {
         if (competenceScores.length > 0) {
             const sumScores = competenceScores.reduce((acc, current) => {
                 Object.keys(current).forEach(key => {
-                    const score = current[key]?.nota;
+                    // Garantimos que a chave exista e tenha o campo 'nota'
+                    const score = current[key]?.nota; 
                     if (score != null) {
                         acc[key] = (acc[key] || 0) + score;
                     }
@@ -372,7 +382,7 @@ export const getUserAchievements = async (userId) => {
 
         const gradedEssays = essays.filter(e => e.corrections.length > 0);
 
-        // Busca a nota total diretamente de notes
+        // 🚨 CORREÇÃO: Busca a nota total em 'notes'
         const essayGrades = gradedEssays
             .map(e => parseJsonSafely(e.corrections[0].notes)?.total)
             .filter(score => score != null);
@@ -383,7 +393,7 @@ export const getUserAchievements = async (userId) => {
             { id: 'road_to_1000', title: 'Quase Perfeito', description: 'Alcance uma nota de 900+.', unlocked: essayGrades.some(grade => grade >= 900) },
         ];
         
-        // Busca C5 em notes
+        // 🚨 CORREÇÃO: Busca C5 em 'notes'
         const c5Scores = gradedEssays
             .map(e => parseJsonSafely(e.corrections[0].notes)?.competencias?.c5?.nota)
             .filter(score => score != null);

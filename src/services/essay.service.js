@@ -80,24 +80,33 @@ const parseJsonSafely = (jsonString) => {
     }
 };
 
+/**
+ * Loga o status da chave de API (visível no log do servidor Render)
+ */
+const logApiKeyStatus = () => {
+    const key = process.env.GEMINI_API_KEY;
+    if (!key) {
+        console.error("DIAGNÓSTICO: GEMINI_API_KEY está AUSENTE no ambiente.");
+    } else {
+        console.log(`DIAGNÓSTICO: GEMINI_API_KEY está PRESENTE. (Início: ${key.substring(0, 4)}...)`);
+    }
+};
+
 // --- Funções Principais do Serviço ---
 
 /**
  * Submete a redação para correção pelo Gemini e salva no banco de dados.
- * @param {string} userId O ID do usuário autenticado.
- * @param {{ essayText: string, essayTopic: string }} essayData Os dados da redação (texto e tema).
- * @returns {Promise<object>} O objeto de correção salvo.
  */
 export const submitEssay = async (userId, essayData) => {
-    // 🚨 FIX CRÍTICO 1: Agora desestruturamos essayText e essayTopic, que são os campos 
-    // que o frontend está enviando (conforme o log do Axios).
+    // Desestruturação correta do payload (essayText e essayTopic)
     const { essayText, essayTopic } = essayData;
 
     if (!essayText || !essayTopic) {
-        // Se este erro ocorrer, significa que o express.json() falhou ou os dados não foram enviados
-        console.error("Validação falhou: essayText ou essayTopic ausentes.");
         throw new Error("O texto e o tema da redação são obrigatórios.");
     }
+    
+    // Ajuda a diagnosticar problemas de configuração de ambiente no Render
+    logApiKeyStatus(); 
 
     try {
         const prompt = generatePrompt(essayText, essayTopic);
@@ -114,11 +123,11 @@ export const submitEssay = async (userId, essayData) => {
                         competencias: {
                             type: "OBJECT",
                             properties: {
-                                c1: { type: "OBJECT", properties: { nota: { type: "NUMBER" }, analise: { type: "STRING" } } },
-                                c2: { type: "OBJECT", properties: { nota: { type: "NUMBER" }, analise: { type: "STRING" } } },
-                                c3: { type: "OBJECT", properties: { nota: { type: "NUMBER" }, analise: { type: "STRING" } } },
-                                c4: { type: "OBJECT", properties: { nota: { type: "NUMBER" }, analise: { type: "STRING" } } },
-                                c5: { type: "OBJECT", properties: { nota: { type: "NUMBER" }, analise: { type: "STRING" } } },
+                                c1: { type: "NUMBER" }, 
+                                c2: { type: "NUMBER" }, 
+                                c3: { type: "NUMBER" }, 
+                                c4: { type: "NUMBER" }, 
+                                c5: { type: "NUMBER" }, 
                             },
                         },
                         total: { type: "NUMBER" },
@@ -134,19 +143,36 @@ export const submitEssay = async (userId, essayData) => {
             contents: [{ parts: [{ text: prompt }] }],
         });
         
-        // 🚨 FIX CRÍTICO 2 (Robustez): Tenta extrair a resposta JSON estruturada
-        // Tenta response.text primeiro, depois a rota completa (mais segura)
+        // Tenta extrair a resposta JSON estruturada
         let rawJsonCorrection = response.text; 
 
         if (!rawJsonCorrection) {
             // Rota mais segura para respostas JSON estruturadas ou quando response.text falha
             rawJsonCorrection = response.candidates?.[0]?.content?.parts?.[0]?.text;
-            console.warn("Raw JSON extraído da rota completa (candidatos).");
+            if (rawJsonCorrection) { 
+                console.log("LOG: Raw JSON extraído da rota completa (candidatos) com sucesso.");
+            }
         }
         
+        // 🚨 NOVO BLOCO DE CHECAGEM DE FALHA DO MODELO 🚨
         if (!rawJsonCorrection) {
-            // Se ainda for undefined/null/empty, o modelo falhou em gerar o JSON
-            console.error("Resposta completa da API Gemini (sem texto de correção):", JSON.stringify(response, null, 2));
+            
+            // 1. Verifica se houve bloqueio por segurança (safety block)
+            const promptFeedback = response.promptFeedback;
+            if (promptFeedback?.blockReason) {
+                const safetyError = `O modelo bloqueou a resposta. Motivo: ${promptFeedback.blockReason}.`;
+                console.error("ERRO GRAVE: Bloqueio de Segurança Gemini:", safetyError);
+                throw new Error(`Falha na correção: A API bloqueou o conteúdo. Por favor, revise o texto da sua redação.`);
+            }
+
+            // 2. Verifica se não houve candidatos (falha total da geração)
+            if (!response.candidates || response.candidates.length === 0) {
+                 console.error("ERRO GRAVE: API Gemini sem candidatos:", JSON.stringify(response, null, 2));
+                 throw new Error("O modelo Gemini não gerou nenhum conteúdo. Pode ser um erro interno da API ou um problema de configuração da chave. Verifique o log do servidor.");
+            }
+
+            // 3. Se ainda for undefined/null/empty
+            console.error("ERRO GRAVE: Resposta completa da API Gemini (sem texto de correção):", JSON.stringify(response, null, 2));
             throw new Error(`O modelo Gemini não retornou o texto de correção (rawJsonCorrection é: ${rawJsonCorrection}). Verifique o log do servidor para mais detalhes.`);
         }
         
@@ -195,29 +221,20 @@ export const submitEssay = async (userId, essayData) => {
         };
 
     } catch (error) {
-        // Se for um erro na chamada da API Gemini, loga e lança um erro mais amigável
+        // Se for um erro na chamada da API Gemini (ex: chave inválida ou timeout de rede)
         if (error.message.includes("GoogleGenerativeAI Error")) {
             console.error("Erro na chamada da API Gemini:", error.message);
             // Lançamos a mensagem de erro original da API para que o frontend a receba no 500.
-            throw new Error(`Falha na API de Correção: ${error.message.split('Error fetching from')[0].trim()}`);
+            throw new Error(`Falha na API de Correção. Por favor, verifique a chave de API e a conexão de rede.`);
         }
         
-        // Se o erro veio do nosso novo bloco de verificação de 'rawJsonCorrection'
-        if (error.message.includes("O modelo Gemini não retornou o texto de correção")) {
-             console.error("Erro de Conteúdo Vazio:", error.message);
-             // Propaga a mensagem de erro específica.
-             throw error; 
-        }
-
-        // Para outros erros (Prisma, etc.)
+        // Para outros erros (Prisma, etc. ou os erros mais específicos que acabamos de lançar)
         throw error;
     }
 };
 
 /**
  * Busca o histórico de redações de um usuário.
- * @param {string} userId O ID do usuário.
- * @returns {Promise<Array<object>>} O histórico de redações com a última correção.
  */
 export const getEssayHistory = async (userId) => {
     const history = await prisma.essay.findMany({
@@ -236,7 +253,7 @@ export const getEssayHistory = async (userId) => {
                       ...essay,
                       correction: {
                           ...essay.corrections[0],
-                          // Use o parseJsonSafely com o 'content' para garantir que os dados JSON sejam lidos corretamente
+                          // Usa o parseJsonSafely com o 'content' para garantir que os dados JSON sejam lidos corretamente
                           notes: parseJsonSafely(essay.corrections[0].content) || essay.corrections[0].notes, 
                       }
                   }))
@@ -245,9 +262,6 @@ export const getEssayHistory = async (userId) => {
 
 /**
  * Busca uma redação específica pelo ID.
- * @param {string} essayId O ID da redação.
- * @param {string} userId O ID do usuário para verificação de posse.
- * @returns {Promise<object>} A redação com todas as correções.
  */
 export const getEssayById = async (essayId, userId) => {
     const essay = await prisma.essay.findUnique({
@@ -282,8 +296,6 @@ export const getEssayById = async (essayId, userId) => {
 
 /**
  * Calcula dados de análise para o dashboard.
- * @param {string} userId O ID do usuário.
- * @returns {Promise<object>} O objeto de analytics.
  */
 export const getEssayAnalytics = async (userId) => {
     try {
@@ -347,8 +359,6 @@ export const getEssayAnalytics = async (userId) => {
 
 /**
  * Retorna as conquistas do usuário.
- * @param {string} userId O ID do usuário.
- * @returns {Promise<Array<object>>} A lista de conquistas.
  */
 export const getUserAchievements = async (userId) => {
     try {

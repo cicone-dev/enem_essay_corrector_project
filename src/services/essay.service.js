@@ -91,90 +91,104 @@ const parseJsonSafely = (jsonString) => {
 /**
  * Processa a submissão e correção de uma nova redação.
  */
-export const submitEssay = async (userId, essayData) => { 
-    try {
-        // 🚨 Mapeamento de chaves corrigido para o frontend (text, topic)
-        const { topic: essayTopic, text: essayText } = essayData; 
-        
-        if (!essayTopic || !essayText || essayTopic.trim() === '' || essayText.trim() === '') {
-             throw new Error("Tópico ou texto da redação está faltando na submissão.");
-        }
-        
-        // 1. Cria a redação no banco de dados
-        const newEssay = await prisma.essay.create({
-            data: {
-                userId,
-                topic: essayTopic,
-                text: essayText,
-            },
-        });
+export const submitEssay = async (userId, essayData) => {
+    const { text: essayText, topic: essayTopic } = essayData;
 
-        // 2. Gera o prompt para o modelo
+    if (!essayText || !essayTopic) {
+        throw new Error("O texto e o tema da redação são obrigatórios.");
+    }
+
+    try {
         const prompt = generatePrompt(essayText, essayTopic);
 
-        // 3. Chamada à API do Gemini
-        const model = genAI.getGenerativeModel({ model: modelName });
-
-        // 🚨 Sintaxe de DOIS ARGUMENTOS (mais estável contra bugs de SDK)
-        const correctionResponse = await model.generateContent(
-            // 1º ARGUMENTO: CONTENTS (Sintaxe de chat)
-            [{ role: "user", parts: [{ text: prompt }] }],
-            
-            // 2º ARGUMENTO: CONFIG (Schema)
-            {
+        const model = genAI.getGenerativeModel({
+            model: modelName,
+            // Adiciona a configuração para forçar a saída em JSON
+            config: {
                 responseMimeType: "application/json",
-                // Schema mantido conforme suas especificações
+                // Define o schema do JSON esperado
                 responseSchema: {
                     type: "OBJECT",
                     properties: {
-                        competencias: { type: "OBJECT" }, total: { type: "NUMBER" },
-                        feedbackGeral: { type: "STRING" }, pontosPositivos: { type: "STRING" },
-                        pontosA_Melhorar: { type: "STRING" }, 
-                        analiseTextual: { 
+                        competencias: {
                             type: "OBJECT",
                             properties: {
-                                coesaoEConectores: { type: "STRING" },
-                                vocabulario: { type: "STRING" },
-                                ortografia: { type: "STRING" },
-                                repertorioSociocultural: { type: "STRING" }
-                            }
+                                c1: { type: "OBJECT", properties: { nota: { type: "NUMBER" }, analise: { type: "STRING" } } },
+                                c2: { type: "OBJECT", properties: { nota: { type: "NUMBER" }, analise: { type: "STRING" } } },
+                                c3: { type: "OBJECT", properties: { nota: { type: "NUMBER" }, analise: { type: "STRING" } } },
+                                c4: { type: "OBJECT", properties: { nota: { type: "NUMBER" }, analise: { type: "STRING" } } },
+                                c5: { type: "OBJECT", properties: { nota: { type: "NUMBER" }, analise: { type: "STRING" } } },
+                            },
                         },
-                        sugestoesDeMelhora: { type: "STRING" }
-                    }
+                        total: { type: "NUMBER" },
+                        feedbackGeral: { type: "STRING" },
+                    },
+                    required: ["competencias", "total", "feedbackGeral"],
                 }
             }
-        );
+        });
 
-        // 4. Processamento da Resposta
-        const rawJson = correctionResponse.text;
-        const correctionData = parseJsonSafely(rawJson);
-
-        // 🚨 Esta linha quebra se o JSON for inválido, mas o parseJsonSafely deve ser mais robusto agora.
-        if (!correctionData || !correctionData.competencias || correctionData.total === undefined) {
-            // Se ainda falhar, é um problema de consistência da resposta do modelo
-            throw new Error(`A IA retornou um formato de correção inválido. Raw Output: ${rawJson.substring(0, 200)}...`);
-        }
-        
-        // 5. Cria a correção no banco de dados
-        const correction = await prisma.correction.create({
-            data: {
-                essayId: newEssay.id,
-                notes: correctionData,
-                total: correctionData.total || 0,
-            },
+        // 🚨 FIX CRÍTICO: Estrutura correta para o conteúdo (mensagem do usuário)
+        const response = await model.generateContent({
+            contents: [{ parts: [{ text: prompt }] }], // Formato de requisição para generateContent
         });
         
-        // 6. Retorna o resultado
+        // A resposta deve ser uma string JSON
+        const rawJsonCorrection = response.text;
+        
+        // Faz o parse seguro da string JSON retornada
+        const parsedCorrection = parseJsonSafely(rawJsonCorrection);
+
+        if (!parsedCorrection || !parsedCorrection.total) {
+            throw new Error(`O modelo retornou uma correção inválida ou incompleta: ${rawJsonCorrection}`);
+        }
+
+        // 1. Salva a redação no banco de dados (se não existir)
+        let essay = await prisma.essay.findFirst({
+            where: {
+                userId: userId,
+                topic: essayTopic,
+                text: essayText,
+            },
+            include: { corrections: { orderBy: { createdAt: 'desc' }, take: 1 } } 
+        });
+
+        if (!essay) {
+            essay = await prisma.essay.create({
+                data: {
+                    userId,
+                    topic: essayTopic,
+                    text: essayText,
+                },
+            });
+        }
+        
+        // 2. Salva a correção associada à redação
+        const correctionRecord = await prisma.correction.create({
+            data: {
+                essayId: essay.id,
+                total: parsedCorrection.total, 
+                notes: parsedCorrection,
+                content: rawJsonCorrection,
+            },
+        });
+
+        // Retorna o objeto completo da correção para o frontend
         return {
-            ...newEssay,
-            latestCorrection: correctionData,
-            correctionId: correction.id,
+            ...correctionRecord,
+            notes: parsedCorrection,
+            essay,
         };
 
     } catch (error) {
-        // Se o erro for do Gemini (formato, etc.), a mensagem detalhada é propagada.
-        console.error("🚨 Erro final no submitEssay:", error.name, error.message);
-        throw new Error(`Falha ao submeter a redação: ${error.message}`);
+        // Se for um erro da API do Google, loga e lança um erro mais amigável
+        if (error.message.includes("GoogleGenerativeAI Error")) {
+            console.error("Erro na chamada da API Gemini:", error.message);
+            // Lançamos a mensagem de erro original da API para que o frontend a receba no 500.
+            throw new Error(`Falha na API de Correção: ${error.message.split('Error fetching from')[0].trim()}`);
+        }
+        // Para outros erros (Prisma, etc.)
+        throw error;
     }
 };
 

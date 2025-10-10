@@ -143,18 +143,20 @@ export const submitEssay = async (userId, essayData) => {
             contents: [{ parts: [{ text: prompt }] }],
         });
         
-        // Tenta extrair a resposta JSON estruturada
-        let rawJsonCorrection = response.text; 
-
+        // 🚨 MUDANÇA CRÍTICA: Priorizamos a extração do JSON do caminho completo
+        // (candidatos), pois é onde o modelo retorna o JSON estruturado,
+        // já que 'response.text' pode vir vazio ao usar 'responseMimeType: application/json'.
+        let rawJsonCorrection = response.candidates?.[0]?.content?.parts?.[0]?.text; 
+        
+        // Se a primeira tentativa falhar, tentamos o caminho direto (fallback)
         if (!rawJsonCorrection) {
-            // Rota mais segura para respostas JSON estruturadas ou quando response.text falha
-            rawJsonCorrection = response.candidates?.[0]?.content?.parts?.[0]?.text;
-            if (rawJsonCorrection) { 
-                console.log("LOG: Raw JSON extraído da rota completa (candidatos) com sucesso.");
+            rawJsonCorrection = response.text;
+            if (rawJsonCorrection) {
+                console.log("LOG: Raw JSON extraído do caminho 'response.text' (fallback) com sucesso.");
             }
         }
         
-        // 🚨 NOVO BLOCO DE CHECAGEM DE FALHA DO MODELO 🚨
+        // 🚨 BLOCO DE CHECAGEM DE FALHA DO MODELO (FOCADO NA EXTRAÇÃO) 🚨
         if (!rawJsonCorrection) {
             
             // 1. Verifica se houve bloqueio por segurança (safety block)
@@ -165,22 +167,17 @@ export const submitEssay = async (userId, essayData) => {
                 throw new Error(`Falha na correção: A API bloqueou o conteúdo. Por favor, revise o texto da sua redação.`);
             }
 
-            // 2. Verifica se não houve candidatos (falha total da geração)
-            if (!response.candidates || response.candidates.length === 0) {
-                 console.error("ERRO GRAVE: API Gemini sem candidatos:", JSON.stringify(response, null, 2));
-                 throw new Error("O modelo Gemini não gerou nenhum conteúdo. Pode ser um erro interno da API ou um problema de configuração da chave. Verifique o log do servidor.");
-            }
-
-            // 3. Se ainda for undefined/null/empty
-            console.error("ERRO GRAVE: Resposta completa da API Gemini (sem texto de correção):", JSON.stringify(response, null, 2));
-            throw new Error(`O modelo Gemini não retornou o texto de correção (rawJsonCorrection é: ${rawJsonCorrection}). Verifique o log do servidor para mais detalhes.`);
+            // 2. Se ainda for undefined/null/empty, algo fundamental falhou
+            console.error("ERRO GRAVE: Resposta completa da API Gemini (JSON não extraído):", JSON.stringify(response, null, 2));
+            throw new Error(`O modelo Gemini não retornou o texto de correção (rawJsonCorrection é: ${rawJsonCorrection}). Verifique o log do servidor para mais detalhes. A chave de API pode estar inválida.`);
         }
         
         // Faz o parse seguro da string JSON retornada
         const parsedCorrection = parseJsonSafely(rawJsonCorrection);
 
         if (!parsedCorrection || parsedCorrection.total === undefined || parsedCorrection.total === null) {
-            throw new Error(`O modelo retornou uma correção inválida ou incompleta: ${rawJsonCorrection}`);
+            console.error("JSON não parseado ou incompleto. RAW JSON:", rawJsonCorrection);
+            throw new Error(`O modelo retornou uma correção inválida ou incompleta. Detalhes no log do servidor.`);
         }
 
         // 1. Salva a redação no banco de dados (se não existir)

@@ -15,7 +15,7 @@ const prisma = new PrismaClient();
  * Gera o prompt detalhado para o modelo Gemini.
  */
 const generatePrompt = (essayText, essayTopic) => {
-    // 🚨 CORREÇÃO CRÍTICA NO PROMPT: Instrução de formato ultra-rígida
+    // 🌟 Lógica do prompt ORIGINAL (suas especificações) preservada
     return `
     Você é um corretor HUMANO de redações de alta performance, especializado na correção de redações do ENEM por anos.
     Sua tarefa é avaliar a redação de acordo com as cinco competências do ENEM (C1 a C5) e fornecer uma análise textual completa.
@@ -28,73 +28,74 @@ const generatePrompt = (essayText, essayTopic) => {
     ${essayText}
     ---
     
-    // ** ESTA É A INSTRUÇÃO CRÍTICA **
-    Sua resposta DEVE ser EXCLUSIVAMENTE o objeto JSON solicitado abaixo. 
-    NÃO adicione preâmbulos, explicações, texto introdutório, nem blocos de código Markdown (\`\`\`) ou texto de encerramento.
-    A PRIMEIRA E ÚLTIMA coisa na sua resposta deve ser, respectivamente, o { e o }. O formato JSON é:
+    Sua resposta DEVE ser estruturada EXCLUSIVAMENTE em JSON e seguir este formato:
     {
       "competencias": {
-        "c1": { "nota": number, "comentario": string },
-        "c2": { "nota": number, "comentario": string },
-        "c3": { "nota": number, "comentario": string },
-        "c4": { "nota": number, "comentario": string },
-        "c5": { "nota": number, "comentario": string }
+        "c1": {
+          "nota": 0, // A nota (0, 40, 80, 120, 160, 200)
+          "analise": "String com a análise da C1."
+        },
+        "c2": {
+          "nota": 0,
+          "analise": "String com a análise da C2."
+        },
+        "c3": {
+          "nota": 0,
+          "analise": "String com a análise da C3."
+        },
+        "c4": {
+          "nota": 0,
+          "analise": "String com a análise da C4."
+        },
+        "c5": {
+          "nota": 0,
+          "analise": "String com a análise da C5."
+        }
       },
-      "total": number,
-      "feedbackGeral": string,
-      "pontosPositivos": string,
-      "pontosA_Melhorar": string,
-      "analiseTextual": {
-        "coesaoEConectores": string,
-        "vocabulario": string,
-        "ortografia": string,
-        "repertorioSociocultural": string
-      },
-      "sugestoesDeMelhora": string
+      "total": 0, // Soma das 5 notas
+      "feedbackGeral": "Análise completa da redação, como um corretor humano, destacando pontos fortes e fracos gerais."
     }
     `;
 };
 
 /**
- * Corrige o JSON de saída e previne erros.
+ * Tenta fazer o parse de uma string JSON, limpando a resposta do modelo.
  */
 const parseJsonSafely = (jsonString) => {
-    if (!jsonString || typeof jsonString !== 'string') {
-        return null;
-    }
-    
-    let cleanString = jsonString.trim();
-
-    // Remove blocos de código Markdown (```json...``` ou ```...```)
-    if (cleanString.startsWith("```")) {
-        // Usa uma regex mais abrangente para garantir a remoção
-        cleanString = cleanString.replace(/^```(json)?\s*|```$/g, '').trim();
-    }
+    if (!jsonString) return null;
 
     try {
-        return JSON.parse(cleanString);
-    } catch (e) {
-        // Se a primeira tentativa de parse falhar, tenta limpar linhas em branco extras
-        try {
-            const strippedString = cleanString.replace(/\r?\n|\r/g, '').trim();
-            return JSON.parse(strippedString);
-        } catch (e2) {
-            console.error("🚨 Erro ao parsear JSON da correção após limpeza:", e2.message);
-            return null;
+        // Tenta limpar a string para remover blocos de código markdown desnecessários (```json)
+        let cleanedString = jsonString.trim();
+        if (cleanedString.startsWith('```json')) {
+            cleanedString = cleanedString.substring(7);
         }
+        if (cleanedString.endsWith('```')) {
+            cleanedString = cleanedString.substring(0, cleanedString.length - 3);
+        }
+        return JSON.parse(cleanedString.trim());
+    } catch (e) {
+        console.error("Erro ao fazer o parse do JSON da correção:", e.message);
+        return null;
     }
 };
 
-
-// --- Funções de Serviço ---
+// --- Funções Principais do Serviço ---
 
 /**
- * Processa a submissão e correção de uma nova redação.
+ * Submete a redação para correção pelo Gemini e salva no banco de dados.
+ * @param {string} userId O ID do usuário autenticado.
+ * @param {{ essayText: string, essayTopic: string }} essayData Os dados da redação (texto e tema).
+ * @returns {Promise<object>} O objeto de correção salvo.
  */
 export const submitEssay = async (userId, essayData) => {
-    const { text: essayText, topic: essayTopic } = essayData;
+    // 🚨 FIX CRÍTICO 1: Agora desestruturamos essayText e essayTopic, que são os campos 
+    // que o frontend está enviando (conforme o log do Axios).
+    const { essayText, essayTopic } = essayData;
 
     if (!essayText || !essayTopic) {
+        // Se este erro ocorrer, significa que o express.json() falhou ou os dados não foram enviados
+        console.error("Validação falhou: essayText ou essayTopic ausentes.");
         throw new Error("O texto e o tema da redação são obrigatórios.");
     }
 
@@ -128,18 +129,31 @@ export const submitEssay = async (userId, essayData) => {
             }
         });
 
-        // 🚨 FIX CRÍTICO: Estrutura correta para o conteúdo (mensagem do usuário)
+        // Estrutura de conteúdo (payload)
         const response = await model.generateContent({
-            contents: [{ parts: [{ text: prompt }] }], // Formato de requisição para generateContent
+            contents: [{ parts: [{ text: prompt }] }],
         });
         
-        // A resposta deve ser uma string JSON
-        const rawJsonCorrection = response.text;
+        // 🚨 FIX CRÍTICO 2 (Robustez): Tenta extrair a resposta JSON estruturada
+        // Tenta response.text primeiro, depois a rota completa (mais segura)
+        let rawJsonCorrection = response.text; 
+
+        if (!rawJsonCorrection) {
+            // Rota mais segura para respostas JSON estruturadas ou quando response.text falha
+            rawJsonCorrection = response.candidates?.[0]?.content?.parts?.[0]?.text;
+            console.warn("Raw JSON extraído da rota completa (candidatos).");
+        }
+        
+        if (!rawJsonCorrection) {
+            // Se ainda for undefined/null/empty, o modelo falhou em gerar o JSON
+            console.error("Resposta completa da API Gemini (sem texto de correção):", JSON.stringify(response, null, 2));
+            throw new Error(`O modelo Gemini não retornou o texto de correção (rawJsonCorrection é: ${rawJsonCorrection}). Verifique o log do servidor para mais detalhes.`);
+        }
         
         // Faz o parse seguro da string JSON retornada
         const parsedCorrection = parseJsonSafely(rawJsonCorrection);
 
-        if (!parsedCorrection || !parsedCorrection.total) {
+        if (!parsedCorrection || parsedCorrection.total === undefined || parsedCorrection.total === null) {
             throw new Error(`O modelo retornou uma correção inválida ou incompleta: ${rawJsonCorrection}`);
         }
 
@@ -147,8 +161,8 @@ export const submitEssay = async (userId, essayData) => {
         let essay = await prisma.essay.findFirst({
             where: {
                 userId: userId,
-                topic: essayTopic,
-                text: essayText,
+                topic: essayTopic, // Uso das variáveis corretas
+                text: essayText,   // Uso das variáveis corretas
             },
             include: { corrections: { orderBy: { createdAt: 'desc' }, take: 1 } } 
         });
@@ -157,8 +171,8 @@ export const submitEssay = async (userId, essayData) => {
             essay = await prisma.essay.create({
                 data: {
                     userId,
-                    topic: essayTopic,
-                    text: essayText,
+                    topic: essayTopic, // Uso das variáveis corretas
+                    text: essayText,   // Uso das variáveis corretas
                 },
             });
         }
@@ -181,162 +195,172 @@ export const submitEssay = async (userId, essayData) => {
         };
 
     } catch (error) {
-        // Se for um erro da API do Google, loga e lança um erro mais amigável
+        // Se for um erro na chamada da API Gemini, loga e lança um erro mais amigável
         if (error.message.includes("GoogleGenerativeAI Error")) {
             console.error("Erro na chamada da API Gemini:", error.message);
             // Lançamos a mensagem de erro original da API para que o frontend a receba no 500.
             throw new Error(`Falha na API de Correção: ${error.message.split('Error fetching from')[0].trim()}`);
         }
+        
+        // Se o erro veio do nosso novo bloco de verificação de 'rawJsonCorrection'
+        if (error.message.includes("O modelo Gemini não retornou o texto de correção")) {
+             console.error("Erro de Conteúdo Vazio:", error.message);
+             // Propaga a mensagem de erro específica.
+             throw error; 
+        }
+
         // Para outros erros (Prisma, etc.)
         throw error;
     }
 };
 
-// ... (Restante das funções getEssayById, getEssayHistory, etc.)
 /**
- * Busca uma redação específica por ID.
+ * Busca o histórico de redações de um usuário.
+ * @param {string} userId O ID do usuário.
+ * @returns {Promise<Array<object>>} O histórico de redações com a última correção.
+ */
+export const getEssayHistory = async (userId) => {
+    const history = await prisma.essay.findMany({
+        where: { userId },
+        include: { 
+            corrections: { 
+                orderBy: { createdAt: 'desc' }, 
+                take: 1 
+            } 
+        },
+        orderBy: { createdAt: 'desc' }, // Ordena as redações, mostrando a mais recente primeiro
+    });
+
+    return history.filter(essay => essay.corrections.length > 0)
+                  .map(essay => ({
+                      ...essay,
+                      correction: {
+                          ...essay.corrections[0],
+                          // Use o parseJsonSafely com o 'content' para garantir que os dados JSON sejam lidos corretamente
+                          notes: parseJsonSafely(essay.corrections[0].content) || essay.corrections[0].notes, 
+                      }
+                  }))
+                  .map(({ corrections, ...rest }) => rest);
+};
+
+/**
+ * Busca uma redação específica pelo ID.
+ * @param {string} essayId O ID da redação.
+ * @param {string} userId O ID do usuário para verificação de posse.
+ * @returns {Promise<object>} A redação com todas as correções.
  */
 export const getEssayById = async (essayId, userId) => {
-    // 🚨 FIX PRISMA: Adiciona validação de ID para evitar Malformed ObjectID
-    if (!essayId || typeof essayId !== 'string' || essayId.length !== 24 || !/^[0-9a-fA-F]{24}$/.test(essayId)) {
-        throw new Error("ID de redação inválido ou incompleto.");
+    const essay = await prisma.essay.findUnique({
+        where: { 
+            id: essayId, 
+            userId: userId
+        },
+        include: {
+            corrections: {
+                orderBy: { createdAt: 'desc' }
+            }
+        }
+    });
+
+    if (!essay) {
+        throw new Error("Redação não encontrada ou acesso negado.");
     }
     
-    try {
-        const essay = await prisma.essay.findUnique({
-            where: { id: essayId, userId: userId },
-            include: {
-                corrections: { orderBy: { createdAt: 'desc' }, take: 1 }
-            }
-        });
+    const correctionsParsed = essay.corrections.map(correction => ({
+        ...correction,
+        // Garante que 'notes' seja o objeto JSON parseado
+        notes: parseJsonSafely(correction.content) || correction.notes
+    }));
 
-        if (!essay) { throw new Error("Redação não encontrada ou acesso negado."); }
 
-        if (essay.corrections && essay.corrections.length > 0) {
-            const latestCorrection = essay.corrections[0];
-            // O campo notes é Json, precisa ser desserializado (se não for feito automaticamente pelo Prisma)
-            // Usamos parseJsonSafely para garantir compatibilidade com o formato JSON da correção
-            essay.latestCorrection = parseJsonSafely(JSON.stringify(latestCorrection.notes)); 
-        } else {
-            essay.latestCorrection = null;
-        }
-        return essay;
-    } catch (error) {
-        console.error("Erro ao buscar redação por ID:", error.message);
-        throw error;
-    }
+    return {
+        ...essay,
+        corrections: correctionsParsed
+    };
 };
 
-
-export const getEssayHistory = async (userId) => {
-    try {
-        const essays = await prisma.essay.findMany({
-            where: { userId },
-            orderBy: { createdAt: 'desc' },
-            include: { corrections: { orderBy: { createdAt: 'desc' }, take: 1 } }
-        });
-
-        return essays.map(essay => {
-            const correction = essay.corrections[0];
-            const parsedContent = correction ? parseJsonSafely(JSON.stringify(correction.notes)) : null;
-
-            return {
-                id: essay.id,
-                topic: essay.topic,
-                createdAt: essay.createdAt,
-                // Usa a nota total salva no campo 'total'
-                total: correction?.total || 0, 
-                correction: parsedContent
-            };
-        }).filter(essay => essay.correction !== null);
-    } catch (error) {
-        console.error("Erro ao buscar histórico de redações:", error.message);
-        throw new Error("Não foi possível carregar o histórico.");
-    }
-};
 
 /**
- * Calcula as métricas de Analytics. (Mantém a lógica robusta)
+ * Calcula dados de análise para o dashboard.
+ * @param {string} userId O ID do usuário.
+ * @returns {Promise<object>} O objeto de analytics.
  */
 export const getEssayAnalytics = async (userId) => {
     try {
-        const allEssays = await prisma.essay.findMany({
-            where: { userId }, orderBy: { createdAt: 'asc' },
-            include: { corrections: { orderBy: { createdAt: 'desc' }, take: 1 } }
+        const essays = await prisma.essay.findMany({
+            where: { userId },
+            include: { corrections: { orderBy: { createdAt: 'desc' }, take: 1 } } 
         });
 
-        const gradedEssays = allEssays
-            .filter(essay => essay.corrections.length > 0)
-            .map(essay => {
-                const parsedContent = parseJsonSafely(JSON.stringify(essay.corrections[0].notes));
-                return { 
-                    ...essay, 
-                    latestCorrection: parsedContent,
-                    // Usa a nota total do DB
-                    total: essay.corrections[0].total || 0 
-                };
-            })
-            .filter(essay => essay.latestCorrection !== null);
+        const gradedEssays = essays.filter(e => e.corrections.length > 0);
+        // Garante que o total seja lido do JSON 'content'
+        const essayGrades = gradedEssays
+            .map(e => parseJsonSafely(e.corrections[0].content)?.total)
+            .filter(score => score != null);
 
         const totalEssays = gradedEssays.length;
+        const averageGrade = totalEssays > 0 
+            ? Math.round(essayGrades.reduce((sum, score) => sum + score, 0) / totalEssays) 
+            : 0;
+        const highestGrade = totalEssays > 0 
+            ? Math.max(...essayGrades) 
+            : 0;
 
-        if (totalEssays === 0) {
-            return { totalEssays: 0, averageScore: 0, scoreHistory: [], competenceAverages: [], latestEssays: [], totalWords: 0 };
+        const recentGrades = essayGrades.slice(0, 5).reverse();
+        
+        const competenceScores = gradedEssays.map(e => 
+            parseJsonSafely(e.corrections[0].content)?.competencias
+        ).filter(c => c != null);
+        
+        const competenceAverages = {};
+        if (competenceScores.length > 0) {
+            const sumScores = competenceScores.reduce((acc, current) => {
+                Object.keys(current).forEach(key => {
+                    const score = current[key]?.nota;
+                    if (score != null) {
+                        acc[key] = (acc[key] || 0) + score;
+                    }
+                });
+                return acc;
+            }, {});
+
+            Object.keys(sumScores).forEach(key => {
+                competenceAverages[key] = Math.round(sumScores[key] / competenceScores.length);
+            });
         }
 
-        const totalScoreSum = gradedEssays.reduce((sum, essay) => sum + (essay.total || 0), 0);
-        const averageScore = Math.round(totalScoreSum / totalEssays) || 0;
 
-        const scoreHistory = gradedEssays.map(essay => ({
-            date: new Date(essay.createdAt).toLocaleDateString('pt-BR', { day: '2-digit', month: 'short' }),
-            total: essay.total || 0,
-        }));
-
-        const competenceSum = gradedEssays.reduce((acc, essay) => {
-            const comps = essay.latestCorrection?.competencias;
-            if (comps) {
-                acc.c1 += comps.c1?.nota || 0; acc.c2 += comps.c2?.nota || 0; acc.c3 += comps.c3?.nota || 0;
-                acc.c4 += comps.c4?.nota || 0; acc.c5 += comps.c5?.nota || 0;
-            }
-            return acc;
-        }, { c1: 0, c2: 0, c3: 0, c4: 0, c5: 0 });
-
-        const competenceAverages = [
-            { subject: 'C1', A: Math.round(competenceSum.c1 / totalEssays) || 0, fullMark: 200 },
-            { subject: 'C2', A: Math.round(competenceSum.c2 / totalEssays) || 0, fullMark: 200 },
-            { subject: 'C3', A: Math.round(competenceSum.c3 / totalEssays) || 0, fullMark: 200 },
-            { subject: 'C4', A: Math.round(competenceSum.c4 / totalEssays) || 0, fullMark: 200 },
-            { subject: 'C5', A: Math.round(competenceSum.c5 / totalEssays) || 0, fullMark: 200 },
-        ];
-
-        const latestEssays = gradedEssays.slice(-3).reverse().map(essay => ({
-            id: essay.id, topic: essay.topic, total: essay.total || 0, createdAt: essay.createdAt
-        }));
-
-        const totalWords = gradedEssays.reduce((sum, essay) => sum + (essay.text?.split(/\s+/).length || 0), 0);
-
-        return { totalEssays, averageScore, scoreHistory, competenceAverages, latestEssays, totalWords };
+        return {
+            totalEssays,
+            averageGrade,
+            highestGrade,
+            recentGrades,
+            competenceAverages,
+        };
 
     } catch (error) {
-        console.error("Erro ao calcular analytics:", error.message);
-        throw new Error("Não foi possível gerar as análises do dashboard.");
+        console.error("Erro ao calcular analytics:", error);
+        throw new Error("Não foi possível calcular a análise de dados.");
     }
 };
 
+
 /**
- * Busca as conquistas e verifica o status de desbloqueio. (Mantém a lógica robusta)
+ * Retorna as conquistas do usuário.
+ * @param {string} userId O ID do usuário.
+ * @returns {Promise<Array<object>>} A lista de conquistas.
  */
 export const getUserAchievements = async (userId) => {
     try {
         const essays = await prisma.essay.findMany({
             where: { userId },
-            include: { corrections: { orderBy: { createdAt: 'desc' }, take: 1 } }
+            include: { corrections: { orderBy: { createdAt: 'desc' }, take: 1 } } 
         });
 
         const gradedEssays = essays.filter(e => e.corrections.length > 0);
 
         const essayGrades = gradedEssays
-            .map(e => e.corrections[0].total)
+            .map(e => parseJsonSafely(e.corrections[0].content)?.total)
             .filter(score => score != null);
 
         const achievements = [
@@ -345,19 +369,30 @@ export const getUserAchievements = async (userId) => {
             { id: 'road_to_1000', title: 'Quase Perfeito', description: 'Alcance uma nota de 900+.', unlocked: essayGrades.some(grade => grade >= 900) },
         ];
         
-        // Lógica de C5: usa o JSON parseado para buscar a nota da competência
         const c5Scores = gradedEssays
-            .map(e => parseJsonSafely(JSON.stringify(e.corrections[0].notes))?.competencias?.c5?.nota)
+            .map(e => parseJsonSafely(e.corrections[0].content)?.competencias?.c5?.nota)
             .filter(score => score != null);
 
         if (c5Scores.some(score => score === 200)) {
             const achievement = achievements.find(a => a.id === 'master_c5');
-            if (achievement) achievement.unlocked = true;
+            if (achievement) {
+                achievement.title = 'Mestre da Proposta';
+                achievement.description = 'Alcance 200 pontos na Competência 5.';
+                achievement.unlocked = true;
+            } else {
+                achievements.push({
+                    id: 'master_c5',
+                    title: 'Mestre da Proposta',
+                    description: 'Alcance 200 pontos na Competência 5.',
+                    unlocked: true
+                });
+            }
         }
-
+        
         return achievements;
+
     } catch (error) {
-        console.error("Erro ao buscar conquistas:", error.message);
-        throw new Error("Não foi possível buscar as conquistas.");
+        console.error("Erro ao buscar conquistas:", error);
+        throw new Error("Não foi possível buscar as conquistas do usuário.");
     }
 };

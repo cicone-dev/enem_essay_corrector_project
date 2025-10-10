@@ -12,6 +12,35 @@ const prisma = new PrismaClient();
 // --- Funções Auxiliares ---
 
 /**
+ * Tenta extrair o conteúdo de texto da resposta da API Gemini, verificando 
+ * múltiplos caminhos para garantir robustez, especialmente com responseMimeType.
+ */
+const extractRawTextFromResponse = (response) => {
+    // 1. Tenta o caminho mais comum para conteúdo estruturado (via candidates)
+    let text = response.candidates?.[0]?.content?.parts?.[0]?.text;
+
+    if (text) return text;
+
+    // 2. Tenta o caminho simples de 'response.text' (usado pelo SDK para o texto principal)
+    text = response.text;
+    
+    if (text) return text;
+    
+    // 3. Último recurso: itera sobre todas as partes do primeiro candidato
+    const candidate = response.candidates?.[0];
+    if (candidate && candidate.content && candidate.content.parts) {
+        for (const part of candidate.content.parts) {
+            if (part.text) {
+                return part.text;
+            }
+        }
+    }
+
+    return null;
+};
+
+
+/**
  * Gera o prompt detalhado para o modelo Gemini.
  */
 const generatePrompt = (essayText, essayTopic) => {
@@ -143,18 +172,8 @@ export const submitEssay = async (userId, essayData) => {
             contents: [{ parts: [{ text: prompt }] }],
         });
         
-        // 🚨 MUDANÇA CRÍTICA: Priorizamos a extração do JSON do caminho completo
-        // (candidatos), pois é onde o modelo retorna o JSON estruturado,
-        // já que 'response.text' pode vir vazio ao usar 'responseMimeType: application/json'.
-        let rawJsonCorrection = response.candidates?.[0]?.content?.parts?.[0]?.text; 
-        
-        // Tentativa de fallback (Embora o log sugira que o primeiro caminho deveria funcionar)
-        if (!rawJsonCorrection) {
-            rawJsonCorrection = response.text;
-            if (rawJsonCorrection) {
-                console.log("LOG: Raw JSON extraído do caminho 'response.text' (fallback) com sucesso.");
-            }
-        }
+        // 🚨 EXTRAÇÃO ROBUSTA: Usa a função para tentar encontrar o JSON em todos os caminhos possíveis
+        let rawJsonCorrection = extractRawTextFromResponse(response);
         
         // --- NOVO DIAGNÓSTICO ---
         // Logamos o que foi extraído para ver se o problema é a variável estar vazia.
@@ -173,6 +192,7 @@ export const submitEssay = async (userId, essayData) => {
             }
 
             // 2. Se ainda for undefined/null/empty, algo fundamental falhou
+            // Mostramos a resposta completa para fins de debug no log do servidor
             console.error("ERRO GRAVE: Resposta completa da API Gemini (JSON não extraído):", JSON.stringify(response, null, 2));
             throw new Error(`O modelo Gemini não retornou o texto de correção (rawJsonCorrection é: ${rawJsonCorrection}). Verifique o log do servidor para mais detalhes. A chave de API pode estar inválida.`);
         }

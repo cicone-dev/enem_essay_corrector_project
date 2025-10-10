@@ -13,9 +13,17 @@ const prisma = new PrismaClient();
 
 /**
  * Tenta extrair o conteúdo de texto da resposta da API Gemini, verificando 
- * múltiplos caminhos para garantir robustez, especialmente com responseMimeType.
+ * múltiplos caminhos para garantir robustez, especialmente com responseMimeType
+ * ou quando a resposta é aninhada (o que acontece em alguns logs de erro).
  */
 const extractRawTextFromResponse = (response) => {
+    // 🚨 NOVO: Tenta extrair se a resposta estiver aninhada sob uma chave 'response' (comum em logs de erro)
+    if (response && response.response) {
+        // Chamada recursiva para tentar extrair da propriedade 'response'
+        const nestedText = extractRawTextFromResponse(response.response);
+        if (nestedText) return nestedText;
+    }
+    
     // 1. Tenta o caminho mais comum para conteúdo estruturado (via candidates)
     let text = response.candidates?.[0]?.content?.parts?.[0]?.text;
 

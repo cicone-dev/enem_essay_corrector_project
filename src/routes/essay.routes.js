@@ -19,6 +19,11 @@ router.post("/", protectRoute, async (req, res) => {
         const correction = await submitEssay(userId, essayData);
         res.status(200).json(correction);
     } catch (error) {
+        // 🚨 CORREÇÃO: Captura o erro de validação e retorna 400
+        if (error.message.includes("está faltando na submissão")) {
+            return res.status(400).json({ message: error.message });
+        }
+        // Se não for um erro 400 conhecido, mantém o 500
         res.status(500).json({ message: error.message });
     }
 });

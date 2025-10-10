@@ -148,13 +148,18 @@ export const submitEssay = async (userId, essayData) => {
         // já que 'response.text' pode vir vazio ao usar 'responseMimeType: application/json'.
         let rawJsonCorrection = response.candidates?.[0]?.content?.parts?.[0]?.text; 
         
-        // Se a primeira tentativa falhar, tentamos o caminho direto (fallback)
+        // Tentativa de fallback (Embora o log sugira que o primeiro caminho deveria funcionar)
         if (!rawJsonCorrection) {
             rawJsonCorrection = response.text;
             if (rawJsonCorrection) {
                 console.log("LOG: Raw JSON extraído do caminho 'response.text' (fallback) com sucesso.");
             }
         }
+        
+        // --- NOVO DIAGNÓSTICO ---
+        // Logamos o que foi extraído para ver se o problema é a variável estar vazia.
+        console.log(`DIAGNÓSTICO: rawJsonCorrection está ${rawJsonCorrection ? 'PREENCHIDA' : 'VAZIA'}.`);
+        // --- FIM NOVO DIAGNÓSTICO ---
         
         // 🚨 BLOCO DE CHECAGEM DE FALHA DO MODELO (FOCADO NA EXTRAÇÃO) 🚨
         if (!rawJsonCorrection) {

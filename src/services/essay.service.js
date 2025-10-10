@@ -13,28 +13,24 @@ const prisma = new PrismaClient();
 
 /**
  * Tenta extrair o conteúdo de texto da resposta da API Gemini, verificando 
- * múltiplos caminhos para garantir robustez, especialmente com responseMimeType
- * ou quando a resposta é aninhada (o que acontece em alguns logs de erro).
+ * múltiplos caminhos para garantir robustez.
  */
 const extractRawTextFromResponse = (response) => {
-    // 🚨 NOVO: Tenta extrair se a resposta estiver aninhada sob uma chave 'response' (comum em logs de erro)
+    // Tenta extrair se a resposta estiver aninhada sob uma chave 'response' (comum em logs de erro)
     if (response && response.response) {
-        // Chamada recursiva para tentar extrair da propriedade 'response'
         const nestedText = extractRawTextFromResponse(response.response);
         if (nestedText) return nestedText;
     }
     
-    // 1. Tenta o caminho mais comum para conteúdo estruturado (via candidates)
+    // Caminho mais comum para conteúdo estruturado
     let text = response.candidates?.[0]?.content?.parts?.[0]?.text;
-
     if (text) return text;
 
-    // 2. Tenta o caminho simples de 'response.text' (usado pelo SDK para o texto principal)
+    // Caminho simples de 'response.text'
     text = response.text;
-    
     if (text) return text;
     
-    // 3. Último recurso: itera sobre todas as partes do primeiro candidato
+    // Último recurso: itera sobre todas as partes
     const candidate = response.candidates?.[0];
     if (candidate && candidate.content && candidate.content.parts) {
         for (const part of candidate.content.parts) {
@@ -52,7 +48,6 @@ const extractRawTextFromResponse = (response) => {
  * Gera o prompt detalhado para o modelo Gemini.
  */
 const generatePrompt = (essayText, essayTopic) => {
-    // 🌟 Lógica do prompt ORIGINAL (suas especificações) preservada
     return `
     Você é um corretor HUMANO de redações de alta performance, especializado na correção de redações do ENEM por anos.
     Sua tarefa é avaliar a redação de acordo com as cinco competências do ENEM (C1 a C5) e fornecer uma análise textual completa.
@@ -69,7 +64,7 @@ const generatePrompt = (essayText, essayTopic) => {
     {
       "competencias": {
         "c1": {
-          "nota": 0, // A nota (0, 40, 80, 120, 160, 200)
+          "nota": 0,
           "analise": "String com a análise da C1."
         },
         "c2": {
@@ -89,7 +84,7 @@ const generatePrompt = (essayText, essayTopic) => {
           "analise": "String com a análise da C5."
         }
       },
-      "total": 0, // Soma das 5 notas
+      "total": 0,
       "feedbackGeral": "Análise completa da redação, como um corretor humano, destacando pontos fortes e fracos gerais."
     }
     `;
@@ -97,13 +92,17 @@ const generatePrompt = (essayText, essayTopic) => {
 
 /**
  * Tenta fazer o parse de uma string JSON, limpando a resposta do modelo.
+ * Adiciona verificação para null/undefined para evitar o erro '.trim()'.
  */
 const parseJsonSafely = (jsonString) => {
     if (!jsonString) return null;
 
+    // Se já for um objeto, retorna-o diretamente.
+    if (typeof jsonString === 'object') return jsonString;
+
     try {
-        // Tenta limpar a string para remover blocos de código markdown desnecessários (```json)
         let cleanedString = jsonString.trim();
+        // Remove o bloco de código markdown
         if (cleanedString.startsWith('```json')) {
             cleanedString = cleanedString.substring(7);
         }
@@ -118,7 +117,7 @@ const parseJsonSafely = (jsonString) => {
 };
 
 /**
- * Loga o status da chave de API (visível no log do servidor Render)
+ * Loga o status da chave de API.
  */
 const logApiKeyStatus = () => {
     const key = process.env.GEMINI_API_KEY;
@@ -135,14 +134,12 @@ const logApiKeyStatus = () => {
  * Submete a redação para correção pelo Gemini e salva no banco de dados.
  */
 export const submitEssay = async (userId, essayData) => {
-    // Desestruturação correta do payload (essayText e essayTopic)
     const { essayText, essayTopic } = essayData;
 
     if (!essayText || !essayTopic) {
         throw new Error("O texto e o tema da redação são obrigatórios.");
     }
     
-    // Ajuda a diagnosticar problemas de configuração de ambiente no Render
     logApiKeyStatus(); 
 
     try {
@@ -150,28 +147,19 @@ export const submitEssay = async (userId, essayData) => {
 
         const model = genAI.getGenerativeModel({
             model: modelName,
-            // CONFIGURAÇÃO DE SAÍDA JSON REMOVIDA
-            // O modelo agora confia no prompt para retornar o JSON.
-            // Isso deve evitar que o SDK oculte o texto de resposta.
         });
 
-        // Estrutura de conteúdo (payload)
+        // Chamada da API Gemini
         const response = await model.generateContent({
             contents: [{ parts: [{ text: prompt }] }],
         });
         
-        // 🚨 EXTRAÇÃO ROBUSTA: Usa a função para tentar encontrar o JSON em todos os caminhos possíveis
-        let rawJsonCorrection = extractRawTextFromResponse(response);
+        // Extrai o JSON bruto
+        const rawJsonCorrection = extractRawTextFromResponse(response);
         
-        // --- NOVO DIAGNÓSTICO ---
-        // Logamos o que foi extraído para ver se o problema é a variável estar vazia.
         console.log(`DIAGNÓSTICO: rawJsonCorrection está ${rawJsonCorrection ? 'PREENCHIDA' : 'VAZIA'}.`);
-        // --- FIM NOVO DIAGNÓSTICO ---
         
-        // 🚨 BLOCO DE CHECAGEM DE FALHA DO MODELO (FOCADO NA EXTRAÇÃO) 🚨
         if (!rawJsonCorrection) {
-            
-            // 1. Verifica se houve bloqueio por segurança (safety block)
             const promptFeedback = response.promptFeedback;
             if (promptFeedback?.blockReason) {
                 const safetyError = `O modelo bloqueou a resposta. Motivo: ${promptFeedback.blockReason}.`;
@@ -179,10 +167,8 @@ export const submitEssay = async (userId, essayData) => {
                 throw new Error(`Falha na correção: A API bloqueou o conteúdo. Por favor, revise o texto da sua redação.`);
             }
 
-            // 2. Se ainda for undefined/null/empty, algo fundamental falhou
-            // Mostramos a resposta completa para fins de debug no log do servidor
             console.error("ERRO GRAVE: Resposta completa da API Gemini (JSON não extraído):", JSON.stringify(response, null, 2));
-            throw new Error(`O modelo Gemini não retornou o texto de correção (rawJsonCorrection é: ${rawJsonCorrection}). Verifique o log do servidor para mais detalhes. A chave de API pode estar inválida.`);
+            throw new Error(`O modelo Gemini não retornou o texto de correção. Verifique o log do servidor para mais detalhes.`);
         }
         
         // Faz o parse seguro da string JSON retornada
@@ -193,12 +179,12 @@ export const submitEssay = async (userId, essayData) => {
             throw new Error(`O modelo retornou uma correção inválida ou incompleta. Detalhes no log do servidor.`);
         }
 
-        // 1. Salva a redação no banco de dados (se não existir)
+        // 1. Encontra/Cria a redação (Essay)
         let essay = await prisma.essay.findFirst({
             where: {
                 userId: userId,
-                topic: essayTopic, // Uso das variáveis corretas
-                text: essayText,   // Uso das variáveis corretas
+                topic: essayTopic,
+                text: essayText,
             },
             include: { corrections: { orderBy: { createdAt: 'desc' }, take: 1 } } 
         });
@@ -207,38 +193,37 @@ export const submitEssay = async (userId, essayData) => {
             essay = await prisma.essay.create({
                 data: {
                     userId,
-                    topic: essayTopic, // Uso das variáveis corretas
-                    text: essayText,   // Uso das variáveis corretas
+                    topic: essayTopic,
+                    text: essayText,
                 },
             });
         }
         
-        // 2. Salva a correção associada à redação
+        // 2. Salva a correção associada à redação (Correction)
+        // 🚨 FIX CRÍTICO: Removendo o campo 'content' que causou o erro de Prisma
         const correctionRecord = await prisma.correction.create({
             data: {
                 essayId: essay.id,
                 total: parsedCorrection.total, 
-                notes: parsedCorrection,
-                content: rawJsonCorrection,
+                notes: parsedCorrection, // O objeto JSON completo é salvo no campo 'notes' (tipo Json)
             },
         });
 
         // Retorna o objeto completo da correção para o frontend
         return {
             ...correctionRecord,
-            notes: parsedCorrection,
+            notes: parsedCorrection, // Garante que o frontend receba o objeto parsed
+            content: rawJsonCorrection, // Incluímos o 'content' na resposta HTTP, mas não no DB
             essay,
         };
 
     } catch (error) {
-        // Se for um erro na chamada da API Gemini (ex: chave inválida ou timeout de rede)
         if (error.message.includes("GoogleGenerativeAI Error")) {
             console.error("Erro na chamada da API Gemini:", error.message);
-            // Lançamos a mensagem de erro original da API para que o frontend a receba no 500.
             throw new Error(`Falha na API de Correção. Por favor, verifique a chave de API e a conexão de rede.`);
         }
         
-        // Para outros erros (Prisma, etc. ou os erros mais específicos que acabamos de lançar)
+        // Em caso de erro de Prisma, lançamos o erro original
         throw error;
     }
 };
@@ -255,18 +240,25 @@ export const getEssayHistory = async (userId) => {
                 take: 1 
             } 
         },
-        orderBy: { createdAt: 'desc' }, // Ordena as redações, mostrando a mais recente primeiro
+        orderBy: { createdAt: 'desc' },
     });
 
     return history.filter(essay => essay.corrections.length > 0)
-                  .map(essay => ({
-                      ...essay,
-                      correction: {
-                          ...essay.corrections[0],
-                          // Usa o parseJsonSafely com o 'content' para garantir que os dados JSON sejam lidos corretamente
-                          notes: parseJsonSafely(essay.corrections[0].content) || essay.corrections[0].notes, 
-                      }
-                  }))
+                  .map(essay => {
+                      const latestCorrection = essay.corrections[0];
+                      // Assumimos que 'notes' contém o objeto JSON (ou que o Prisma o parseou)
+                      const parsedNotes = parseJsonSafely(latestCorrection.notes);
+
+                      return {
+                          ...essay,
+                          correction: {
+                              ...latestCorrection,
+                              notes: parsedNotes, 
+                              // O campo 'content' não existe mais no DB, mas podemos criar uma propriedade
+                              // para consistência (embora notes já contenha o objeto).
+                          }
+                      };
+                  })
                   .map(({ corrections, ...rest }) => rest);
 };
 
@@ -292,8 +284,8 @@ export const getEssayById = async (essayId, userId) => {
     
     const correctionsParsed = essay.corrections.map(correction => ({
         ...correction,
-        // Garante que 'notes' seja o objeto JSON parseado
-        notes: parseJsonSafely(correction.content) || correction.notes
+        // Garante que 'notes' seja o objeto JSON parseado (usa parseJsonSafely em caso de string)
+        notes: parseJsonSafely(correction.notes)
     }));
 
 
@@ -315,9 +307,9 @@ export const getEssayAnalytics = async (userId) => {
         });
 
         const gradedEssays = essays.filter(e => e.corrections.length > 0);
-        // Garante que o total seja lido do JSON 'content'
+        // Agora busca a nota total diretamente de notes
         const essayGrades = gradedEssays
-            .map(e => parseJsonSafely(e.corrections[0].content)?.total)
+            .map(e => parseJsonSafely(e.corrections[0].notes)?.total)
             .filter(score => score != null);
 
         const totalEssays = gradedEssays.length;
@@ -330,8 +322,9 @@ export const getEssayAnalytics = async (userId) => {
 
         const recentGrades = essayGrades.slice(0, 5).reverse();
         
+        // Busca as notas de competências em notes
         const competenceScores = gradedEssays.map(e => 
-            parseJsonSafely(e.corrections[0].content)?.competencias
+            parseJsonSafely(e.corrections[0].notes)?.competencias
         ).filter(c => c != null);
         
         const competenceAverages = {};
@@ -379,8 +372,9 @@ export const getUserAchievements = async (userId) => {
 
         const gradedEssays = essays.filter(e => e.corrections.length > 0);
 
+        // Busca a nota total diretamente de notes
         const essayGrades = gradedEssays
-            .map(e => parseJsonSafely(e.corrections[0].content)?.total)
+            .map(e => parseJsonSafely(e.corrections[0].notes)?.total)
             .filter(score => score != null);
 
         const achievements = [
@@ -389,8 +383,9 @@ export const getUserAchievements = async (userId) => {
             { id: 'road_to_1000', title: 'Quase Perfeito', description: 'Alcance uma nota de 900+.', unlocked: essayGrades.some(grade => grade >= 900) },
         ];
         
+        // Busca C5 em notes
         const c5Scores = gradedEssays
-            .map(e => parseJsonSafely(e.corrections[0].content)?.competencias?.c5?.nota)
+            .map(e => parseJsonSafely(e.corrections[0].notes)?.competencias?.c5?.nota)
             .filter(score => score != null);
 
         if (c5Scores.some(score => score === 200)) {

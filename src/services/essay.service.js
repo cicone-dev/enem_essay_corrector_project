@@ -142,29 +142,9 @@ export const submitEssay = async (userId, essayData) => {
 
         const model = genAI.getGenerativeModel({
             model: modelName,
-            // Adiciona a configuração para forçar a saída em JSON
-            config: {
-                responseMimeType: "application/json",
-                // Define o schema do JSON esperado
-                responseSchema: {
-                    type: "OBJECT",
-                    properties: {
-                        competencias: {
-                            type: "OBJECT",
-                            properties: {
-                                c1: { type: "NUMBER" }, 
-                                c2: { type: "NUMBER" }, 
-                                c3: { type: "NUMBER" }, 
-                                c4: { type: "NUMBER" }, 
-                                c5: { type: "NUMBER" }, 
-                            },
-                        },
-                        total: { type: "NUMBER" },
-                        feedbackGeral: { type: "STRING" },
-                    },
-                    required: ["competencias", "total", "feedbackGeral"],
-                }
-            }
+            // CONFIGURAÇÃO DE SAÍDA JSON REMOVIDA
+            // O modelo agora confia no prompt para retornar o JSON.
+            // Isso deve evitar que o SDK oculte o texto de resposta.
         });
 
         // Estrutura de conteúdo (payload)
